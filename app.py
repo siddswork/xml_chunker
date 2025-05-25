@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 from pathlib import Path
+import io
 
 st.set_page_config(
     page_title="XML Chunker",
@@ -47,6 +48,30 @@ st.markdown("""
     .generate-button {
         margin-top: 20px;
     }
+    .xml-display {
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        padding: 10px;
+        max-height: 500px;
+        overflow-y: auto;
+        font-family: monospace;
+        white-space: pre-wrap;
+        margin-top: 10px;
+        background-color: #f8f9fa;
+    }
+    .content-container {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+    .columns-container {
+        display: flex;
+        gap: 20px;
+    }
+    .column {
+        flex: 1;
+        padding: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -74,42 +99,74 @@ def read_file_content(file_path):
         st.error(f"Error reading file: {e}")
         return ""
 
+def generate_dummy_xml():
+    """Generate a dummy XML file (placeholder)."""
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<dummy>
+  <message>XML generation will be implemented in future versions</message>
+</dummy>"""
+
 def main():
     st.markdown('<div class="main-header">XML Chunker</div>', unsafe_allow_html=True)
     st.markdown('Parse XSD schemas and generate dummy XML files')
     
     st.sidebar.markdown('<div class="sub-header">Settings</div>', unsafe_allow_html=True)
     
-    folder_path = st.sidebar.text_input("Enter folder path containing XSD files:", 
-                                        value=str(Path.home() / "repos" / "xml_chunker" / "resource" / "21_3_5_distribution_schemas"))
+    default_folder = str(Path.home() / "repos" / "xml_chunker" / "resource" / "21_3_5_distribution_schemas")
     
-    if st.sidebar.button("Browse..."):
-        st.sidebar.info("In a full implementation, this would open a file browser dialog.")
+    xsd_files = list_xsd_files(default_folder)
     
-    if folder_path:
-        st.sidebar.markdown('<div class="sub-header">XSD Files</div>', unsafe_allow_html=True)
-        xsd_files = list_xsd_files(folder_path)
+    default_index = 0
+    if "IATA_OrderCreateRQ.xsd" in xsd_files:
+        default_index = xsd_files.index("IATA_OrderCreateRQ.xsd")
+    
+    uploaded_file = st.sidebar.file_uploader("Select a XSD file", type=["xsd"])
+    
+    st.sidebar.markdown('<div class="sub-header">Or select from existing files:</div>', unsafe_allow_html=True)
+    selected_file = st.sidebar.selectbox(
+        "Select an XSD file:",
+        xsd_files,
+        index=default_index
+    )
+    
+    if uploaded_file is not None:
+        file_content = uploaded_file.getvalue().decode("utf-8")
+        file_name = uploaded_file.name
         
-        if xsd_files:
-            selected_file = st.sidebar.selectbox("Select an XSD file:", xsd_files)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<div class="sub-header">Selected XSD:</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="selected-file">{file_name}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="content-display">' + file_content + '</div>', unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown('<div class="sub-header">Generated XML:</div>', unsafe_allow_html=True)
             
-            if selected_file:
-                file_path = os.path.join(folder_path, selected_file)
-                
-                st.markdown(f'<div class="sub-header">Selected XSD: {selected_file}</div>', unsafe_allow_html=True)
-                
-                file_content = read_file_content(file_path)
-                st.markdown('<div class="sub-header">XSD Content:</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="content-display">{file_content}</div>', unsafe_allow_html=True)
-                
-                st.markdown('<div class="generate-button">', unsafe_allow_html=True)
-                if st.button("Generate XML"):
-                    st.info("XML generation functionality will be implemented in future versions.")
-                st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.sidebar.warning("No XSD files found in the selected folder.")
+            if st.button("Generate XML"):
+                xml_content = generate_dummy_xml()
+                st.markdown('<div class="xml-display">' + xml_content + '</div>', unsafe_allow_html=True)
+    
+    elif selected_file:
+        file_path = os.path.join(default_folder, selected_file)
+        file_content = read_file_content(file_path)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<div class="sub-header">Selected XSD:</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="selected-file">{selected_file}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="content-display">' + file_content + '</div>', unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown('<div class="sub-header">Generated XML:</div>', unsafe_allow_html=True)
+            
+            if st.button("Generate XML"):
+                xml_content = generate_dummy_xml()
+                st.markdown('<div class="xml-display">' + xml_content + '</div>', unsafe_allow_html=True)
+    
     else:
-        st.warning("Please enter a folder path containing XSD files.")
+        st.warning("Please select an XSD file to continue.")
 
 if __name__ == "__main__":
     main()
