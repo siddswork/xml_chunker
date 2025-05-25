@@ -137,14 +137,18 @@ def main():
         with col1:
             st.markdown('<div class="sub-header">Selected XSD:</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="selected-file">{file_name}</div>', unsafe_allow_html=True)
-            st.code(file_content, language="xml")
+            edited_xsd_content = st.text_area("Edit XSD", file_content, height=500, key="xsd_editor")
         
         with col2:
             st.markdown('<div class="sub-header">Generated XML:</div>', unsafe_allow_html=True)
             
             if st.button("Generate XML"):
                 with st.spinner("Generating XML..."):
-                    xml_content = generate_xml_from_xsd(temp_file_path, file_name)
+                    edited_temp_file_path = os.path.join(temp_dir, f"edited_{file_name}")
+                    with open(edited_temp_file_path, 'w', encoding='utf-8') as edited_file:
+                        edited_file.write(edited_xsd_content)
+                    
+                    xml_content = generate_xml_from_xsd(edited_temp_file_path, file_name)
                     st.code(xml_content, language="xml")
                     
                     try:
