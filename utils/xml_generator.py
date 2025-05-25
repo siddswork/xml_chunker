@@ -164,7 +164,19 @@ class XMLGenerator:
         if element.type.is_complex() and hasattr(element.type, 'content') and element.type.content is not None:
             try:
                 for child in element.type.content.iter_elements():
-                    child_name = child.name
+                    child_namespace = child.target_namespace
+                    child_local_name = child.local_name
+                    
+                    prefix = None
+                    for p, ns in self.schema.namespaces.items():
+                        if ns == child_namespace and p:
+                            prefix = p
+                            break
+                    
+                    if prefix and child_namespace != self.schema.target_namespace:
+                        child_name = f"{prefix}:{child_local_name}"
+                    else:
+                        child_name = child_local_name
                     
                     if child.type is not None and child.type.is_complex():
                         child_dict = self._create_element_dict(child)
@@ -218,20 +230,20 @@ class XMLGenerator:
             # Create a dictionary representation of the XML
             xml_dict = self._create_element_dict(root_element)
             
+            nsmap = {}
+            for prefix, uri in self.schema.namespaces.items():
+                if prefix and uri and prefix != 'xml':
+                    nsmap[prefix] = uri
+            
+            if self.schema.target_namespace:
+                nsmap[None] = self.schema.target_namespace
+            
             try:
-                root = etree.Element(root_name)
-                
-                ns = self.schema.target_namespace
-                if ns:
-                    root.set('xmlns', ns)
-                
-                for prefix, namespace in self.schema.namespaces.items():
-                    if prefix and namespace and prefix != 'xml':
-                        root.set(f'xmlns:{prefix}', namespace)
+                root = etree.Element(etree.QName(self.schema.target_namespace, root_name), nsmap=nsmap)
                 
                 self._build_xml_tree(root, xml_dict)
                 
-                xml_string = etree.tostring(root, encoding='utf-8', pretty_print=True).decode('utf-8')
+                xml_string = etree.tostring(root, encoding='utf-8', pretty_print=True, xml_declaration=False).decode('utf-8')
             except Exception as encode_error:
                 try:
                     xml_element = self.schema.encode(xml_dict, path=root_name)
@@ -278,15 +290,29 @@ class XMLGenerator:
             
             for k, v in data.items():
                 if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
+                    if ':' in k:
+                        ns_prefix, local_name = k.split(':', 1)
+                        ns_uri = self.schema.namespaces.get(ns_prefix)
+                        if ns_uri:
+                            qname = etree.QName(ns_uri, local_name)
+                        else:
+                            qname = k
+                    else:
+                        ns_uri = self.schema.target_namespace
+                        if ns_uri:
+                            qname = etree.QName(ns_uri, k)
+                        else:
+                            qname = k
+                    
                     if isinstance(v, list):
                         for item in v:
-                            child_element = etree.SubElement(parent_element, k)
+                            child_element = etree.SubElement(parent_element, qname)
                             if isinstance(item, dict):
                                 self._build_xml_tree(child_element, item)
                             else:
                                 child_element.text = str(item)
                     else:
-                        child_element = etree.SubElement(parent_element, k)
+                        child_element = etree.SubElement(parent_element, qname)
                         if isinstance(v, dict):
                             self._build_xml_tree(child_element, v)
                         else:
