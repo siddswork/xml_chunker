@@ -31,7 +31,7 @@ class XMLGenerator:
     def _load_schema(self) -> None:
         """Load the XSD schema from the file."""
         try:
-            self.schema = xmlschema.XMLSchema(self.xsd_path)
+            self.schema = xmlschema.XMLSchema(os.path.abspath(self.xsd_path))
         except Exception as e:
             raise ValueError(f"Failed to load XSD schema: {e}")
     
@@ -136,31 +136,42 @@ class XMLGenerator:
         """
         result = {}
         
-        if element.type.is_complex() and element.type.attributes:
-            for attr_name, attr in element.type.attributes.items():
-                attr_type = str(attr.type)
-                result[f'@{attr_name}'] = self._generate_value_for_type(attr_type)
+        if element.type is None:
+            return self._generate_random_string()
         
-        if element.type.is_complex() and hasattr(element.type, 'content'):
-            for child in element.type.content.iter_elements():
-                child_name = child.name
-                
-                if child.type.is_complex():
-                    child_dict = self._create_element_dict(child)
+        if element.type.is_complex() and hasattr(element.type, 'attributes') and element.type.attributes:
+            for attr_name, attr in element.type.attributes.items():
+                if attr.type is not None:
+                    attr_type = str(attr.type)
+                    result[f'@{attr_name}'] = self._generate_value_for_type(attr_type)
+        
+        if element.type.is_complex() and hasattr(element.type, 'content') and element.type.content is not None:
+            try:
+                for child in element.type.content.iter_elements():
+                    child_name = child.name
                     
-                    if child.max_occurs > 1:
-                        num_items = random.randint(1, min(3, child.max_occurs))
-                        result[child_name] = [child_dict for _ in range(num_items)]
+                    if child.type is not None and child.type.is_complex():
+                        child_dict = self._create_element_dict(child)
+                        
+                        if child.max_occurs > 1:
+                            max_items = 3 if child.max_occurs is None or child.max_occurs > 3 else child.max_occurs
+                            num_items = random.randint(1, max_items)
+                            result[child_name] = [child_dict for _ in range(num_items)]
+                        else:
+                            result[child_name] = child_dict
+                    elif child.type is not None:
+                        child_type = str(child.type)
+                        
+                        if child.max_occurs > 1:
+                            max_items = 3 if child.max_occurs is None or child.max_occurs > 3 else child.max_occurs
+                            num_items = random.randint(1, max_items)
+                            result[child_name] = [self._generate_value_for_type(child_type) for _ in range(num_items)]
+                        else:
+                            result[child_name] = self._generate_value_for_type(child_type)
                     else:
-                        result[child_name] = child_dict
-                else:
-                    child_type = str(child.type)
-                    
-                    if child.max_occurs > 1:
-                        num_items = random.randint(1, min(3, child.max_occurs))
-                        result[child_name] = [self._generate_value_for_type(child_type) for _ in range(num_items)]
-                    else:
-                        result[child_name] = self._generate_value_for_type(child_type)
+                        result[child_name] = self._generate_random_string()
+            except Exception as e:
+                result['_error'] = f"Error processing complex type: {str(e)}"
         
         elif element.type.is_simple():
             return self._generate_value_for_type(str(element.type))
@@ -188,10 +199,17 @@ class XMLGenerator:
             root_name = root_elements[0]
             root_element = self.schema.elements[root_name]
             
+            # Create a dictionary representation of the XML
             xml_dict = self._create_element_dict(root_element)
             
-            xml_element = self.schema.encode(xml_dict, path=root_name)
-            xml_string = ET.tostring(xml_element, encoding='utf-8').decode('utf-8')
+            try:
+                xml_element = self.schema.encode(xml_dict, path=root_name)
+                xml_string = ET.tostring(xml_element, encoding='utf-8').decode('utf-8')
+            except Exception as encode_error:
+                namespace = self.schema.target_namespace
+                namespace_prefix = f'xmlns="{namespace}"' if namespace else ''
+                
+                xml_string = self._dict_to_xml(root_name, xml_dict, namespace_prefix)
             
             xml_content = f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_string}'
             
@@ -209,3 +227,54 @@ class XMLGenerator:
                 f'</error>'
             )
             return error_xml
+            
+    def _dict_to_xml(self, element_name: str, data: Union[Dict[str, Any], str, int, float, bool, None], namespace_prefix: str = '') -> str:
+        """
+        Convert a dictionary to XML string.
+        
+        Args:
+            element_name: Name of the XML element
+            data: Dictionary or value to convert
+            namespace_prefix: XML namespace prefix
+            
+        Returns:
+            XML string
+        """
+        if data is None:
+            return f'<{element_name}></{element_name}>'
+            
+        if isinstance(data, dict):
+            attrs = {}
+            for k, v in data.items():
+                if isinstance(k, str) and k.startswith('@'):
+                    attrs[k[1:]] = v
+            
+            attrs_str = ' '.join([f'{k}="{v}"' for k, v in attrs.items() if v is not None])
+            
+            if namespace_prefix and self.schema and element_name == list(self.schema.elements.keys())[0]:
+                if attrs_str:
+                    attrs_str = f'{namespace_prefix} {attrs_str}'
+                else:
+                    attrs_str = namespace_prefix
+            
+            children = {}
+            for k, v in data.items():
+                if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
+                    children[k] = v
+            
+            if not children:
+                return f'<{element_name}{" " + attrs_str if attrs_str else ""}></{element_name}>'
+            
+            xml_parts = [f'<{element_name}{" " + attrs_str if attrs_str else ""}>']
+            
+            for child_name, child_data in children.items():
+                if isinstance(child_data, list):
+                    for item in child_data:
+                        xml_parts.append(self._dict_to_xml(child_name, item))
+                else:
+                    xml_parts.append(self._dict_to_xml(child_name, child_data))
+            
+            xml_parts.append(f'</{element_name}>')
+            return ''.join(xml_parts)
+        else:
+            return f'<{element_name}>{data}</{element_name}>'
