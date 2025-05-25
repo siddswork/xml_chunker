@@ -1,6 +1,8 @@
 import streamlit as st
 import io
-import html
+import os
+import tempfile
+from utils.xml_generator import XMLGenerator
 
 st.set_page_config(
     page_title="XML Chunker",
@@ -54,12 +56,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def generate_dummy_xml():
-    """Generate a dummy XML file (placeholder)."""
-    return """<?xml version="1.0" encoding="UTF-8"?>
-<dummy>
-  <message>XML generation will be implemented in future versions</message>
-</dummy>"""
+def generate_xml_from_xsd(xsd_file_path):
+    """
+    Generate XML from XSD schema.
+    
+    Args:
+        xsd_file_path: Path to the XSD file
+        
+    Returns:
+        Generated XML content
+    """
+    try:
+        generator = XMLGenerator(xsd_file_path)
+        return generator.generate_dummy_xml()
+    except Exception as e:
+        return f"""<?xml version="1.0" encoding="UTF-8"?>
+<error>
+  <message>Error generating XML: {str(e)}</message>
+</error>"""
 
 def main():
     st.markdown('<div class="main-header">XML Chunker</div>', unsafe_allow_html=True)
@@ -73,6 +87,10 @@ def main():
         file_content = uploaded_file.getvalue().decode("utf-8")
         file_name = uploaded_file.name
         
+        with tempfile.NamedTemporaryFile(suffix='.xsd', delete=False) as temp_file:
+            temp_file.write(uploaded_file.getvalue())
+            temp_file_path = temp_file.name
+        
         col1, col2 = st.columns(2)
         
         with col1:
@@ -84,8 +102,14 @@ def main():
             st.markdown('<div class="sub-header">Generated XML:</div>', unsafe_allow_html=True)
             
             if st.button("Generate XML"):
-                xml_content = generate_dummy_xml()
+                with st.spinner("Generating XML..."):
+                    xml_content = generate_xml_from_xsd(temp_file_path)
                 st.code(xml_content, language="xml")
+                
+        try:
+            os.unlink(temp_file_path)
+        except:
+            pass
     else:
         st.info("Please select an XSD file to continue.")
 
