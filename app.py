@@ -24,7 +24,7 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     .selected-file {
-        background-color: #f0f2f6;
+        background-color: #5830D8;
         border-radius: 5px;
         padding: 10px;
         margin-top: 10px;
