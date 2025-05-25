@@ -68,34 +68,9 @@ def generate_xml_from_xsd(xsd_file_path, xsd_file_name):
         Generated XML content
     """
     try:
-        if xsd_file_name == "IATA_OrderViewRS.xsd":
-            return '''<?xml version="1.0" encoding="UTF-8"?>
-<IATA_OrderViewRS xmlns:cns="http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersMessage">
-  <!-- Mandatory element with max occurrence: unbounded -->
-  <Error>
-    <cns:Code>ERR001</cns:Code>
-    <cns:DescText>Error description 1</cns:DescText>
-    <cns:LangCode>EN</cns:LangCode>
-    <cns:TypeCode>ERR</cns:TypeCode>
-  </Error>
-  <Error>
-    <cns:Code>ERR002</cns:Code>
-    <cns:DescText>Error description 2</cns:DescText>
-    <cns:LangCode>EN</cns:LangCode>
-    <cns:TypeCode>ERR</cns:TypeCode>
-  </Error>
-  <!-- Optional element -->
-  <AugmentationPoint/>
-  <!-- Optional element -->
-  <PayloadAttributes>
-    <cns:TrxID>TRX123</cns:TrxID>
-    <cns:VersionNumber>1.0</cns:VersionNumber>
-  </PayloadAttributes>
-</IATA_OrderViewRS>'''
-        
         resource_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resource', '21_3_5_distribution_schemas')
         
-        if os.path.exists(resource_dir) and xsd_file_name.startswith('IATA_'):
+        if os.path.exists(resource_dir):
             temp_dir = os.path.dirname(xsd_file_path)
             
             for filename in os.listdir(resource_dir):

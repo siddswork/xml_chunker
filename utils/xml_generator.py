@@ -34,13 +34,19 @@ class XMLGenerator:
         """Load the XSD schema from the file."""
         try:
             base_dir = os.path.dirname(os.path.abspath(self.xsd_path))
+            print(f"Loading XSD schema from: {self.xsd_path}")
+            print(f"Base directory for schema: {base_dir}")
             
             # Create a list of all XSD files in the same directory to help with imports
             xsd_files = []
             for filename in os.listdir(base_dir):
                 if filename.endswith('.xsd'):
                     xsd_files.append(os.path.join(base_dir, filename))
-            
+            print(f"Found XSD files: {xsd_files}")
+            for f in xsd_files:
+                if "IATA_OffersAndOrdersCommonTypes.xsd" in f:
+                    print(f" - {f}")
+
             self.schema = xmlschema.XMLSchema(
                 os.path.abspath(self.xsd_path),
                 base_url=base_dir,
