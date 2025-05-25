@@ -31,7 +31,12 @@ class XMLGenerator:
     def _load_schema(self) -> None:
         """Load the XSD schema from the file."""
         try:
-            self.schema = xmlschema.XMLSchema(os.path.abspath(self.xsd_path))
+            base_dir = os.path.dirname(os.path.abspath(self.xsd_path))
+            
+            self.schema = xmlschema.XMLSchema(
+                os.path.abspath(self.xsd_path),
+                base_url=base_dir
+            )
         except Exception as e:
             raise ValueError(f"Failed to load XSD schema: {e}")
     

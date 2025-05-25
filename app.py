@@ -56,17 +56,31 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def generate_xml_from_xsd(xsd_file_path):
+def generate_xml_from_xsd(xsd_file_path, xsd_file_name):
     """
     Generate XML from XSD schema.
     
     Args:
         xsd_file_path: Path to the XSD file
+        xsd_file_name: Original name of the XSD file
         
     Returns:
         Generated XML content
     """
     try:
+        resource_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resource', '21_3_5_distribution_schemas')
+        
+        if os.path.exists(resource_dir) and xsd_file_name.startswith('IATA_'):
+            temp_dir = os.path.dirname(xsd_file_path)
+            
+            for filename in os.listdir(resource_dir):
+                if filename.endswith('.xsd') and filename != xsd_file_name:
+                    src_path = os.path.join(resource_dir, filename)
+                    dst_path = os.path.join(temp_dir, filename)
+                    with open(src_path, 'rb') as src_file:
+                        with open(dst_path, 'wb') as dst_file:
+                            dst_file.write(src_file.read())
+        
         generator = XMLGenerator(xsd_file_path)
         return generator.generate_dummy_xml()
     except Exception as e:
@@ -87,9 +101,11 @@ def main():
         file_content = uploaded_file.getvalue().decode("utf-8")
         file_name = uploaded_file.name
         
-        with tempfile.NamedTemporaryFile(suffix='.xsd', delete=False) as temp_file:
+        temp_dir = tempfile.mkdtemp()
+        temp_file_path = os.path.join(temp_dir, file_name)
+        
+        with open(temp_file_path, 'wb') as temp_file:
             temp_file.write(uploaded_file.getvalue())
-            temp_file_path = temp_file.name
         
         col1, col2 = st.columns(2)
         
@@ -103,11 +119,12 @@ def main():
             
             if st.button("Generate XML"):
                 with st.spinner("Generating XML..."):
-                    xml_content = generate_xml_from_xsd(temp_file_path)
+                    xml_content = generate_xml_from_xsd(temp_file_path, file_name)
                 st.code(xml_content, language="xml")
                 
         try:
-            os.unlink(temp_file_path)
+            import shutil
+            shutil.rmtree(temp_dir)
         except:
             pass
     else:
