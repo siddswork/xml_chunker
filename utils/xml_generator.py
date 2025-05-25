@@ -219,13 +219,27 @@ class XMLGenerator:
             xml_dict = self._create_element_dict(root_element)
             
             try:
-                xml_element = self.schema.encode(xml_dict, path=root_name)
-                xml_string = ET.tostring(xml_element, encoding='utf-8').decode('utf-8')
-            except Exception as encode_error:
-                namespace = self.schema.target_namespace
-                namespace_prefix = f'xmlns="{namespace}"' if namespace else ''
+                root = etree.Element(root_name)
                 
-                xml_string = self._dict_to_xml(root_name, xml_dict, namespace_prefix)
+                ns = self.schema.target_namespace
+                if ns:
+                    root.set('xmlns', ns)
+                
+                for prefix, namespace in self.schema.namespaces.items():
+                    if prefix and namespace and prefix != 'xml':
+                        root.set(f'xmlns:{prefix}', namespace)
+                
+                self._build_xml_tree(root, xml_dict)
+                
+                xml_string = etree.tostring(root, encoding='utf-8', pretty_print=True).decode('utf-8')
+            except Exception as encode_error:
+                try:
+                    xml_element = self.schema.encode(xml_dict, path=root_name)
+                    xml_string = ET.tostring(xml_element, encoding='utf-8').decode('utf-8')
+                except Exception:
+                    namespace = self.schema.target_namespace
+                    namespace_prefix = f'xmlns="{namespace}"' if namespace else ''
+                    xml_string = self._dict_to_xml(root_name, xml_dict, namespace_prefix)
             
             xml_content = f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_string}'
             
@@ -244,6 +258,42 @@ class XMLGenerator:
             )
             return error_xml
             
+    def _build_xml_tree(self, parent_element: etree.Element, data: Union[Dict[str, Any], str, int, float, bool, None]) -> None:
+        """
+        Recursively build an XML tree from a dictionary.
+        
+        Args:
+            parent_element: Parent XML element
+            data: Dictionary or value to convert
+        """
+        if data is None:
+            return
+            
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(k, str) and k.startswith('@'):
+                    attr_name = k[1:]
+                    if v is not None:
+                        parent_element.set(attr_name, str(v))
+            
+            for k, v in data.items():
+                if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
+                    if isinstance(v, list):
+                        for item in v:
+                            child_element = etree.SubElement(parent_element, k)
+                            if isinstance(item, dict):
+                                self._build_xml_tree(child_element, item)
+                            else:
+                                child_element.text = str(item)
+                    else:
+                        child_element = etree.SubElement(parent_element, k)
+                        if isinstance(v, dict):
+                            self._build_xml_tree(child_element, v)
+                        else:
+                            child_element.text = str(v)
+        else:
+            parent_element.text = str(data)
+    
     def _dict_to_xml(self, element_name: str, data: Union[Dict[str, Any], str, int, float, bool, None], namespace_prefix: str = '') -> str:
         """
         Convert a dictionary to XML string.
