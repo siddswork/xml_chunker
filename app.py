@@ -120,13 +120,13 @@ def main():
             if st.button("Generate XML"):
                 with st.spinner("Generating XML..."):
                     xml_content = generate_xml_from_xsd(temp_file_path, file_name)
-                st.code(xml_content, language="xml")
-                
-        try:
-            import shutil
-            shutil.rmtree(temp_dir)
-        except:
-            pass
+                    st.code(xml_content, language="xml")
+                    
+                    try:
+                        import shutil
+                        shutil.rmtree(temp_dir)
+                    except:
+                        pass
     else:
         st.info("Please select an XSD file to continue.")
 
