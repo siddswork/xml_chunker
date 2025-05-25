@@ -33,9 +33,20 @@ class XMLGenerator:
         try:
             base_dir = os.path.dirname(os.path.abspath(self.xsd_path))
             
+            # Create a list of all XSD files in the same directory to help with imports
+            xsd_files = []
+            for filename in os.listdir(base_dir):
+                if filename.endswith('.xsd'):
+                    xsd_files.append(os.path.join(base_dir, filename))
+            
             self.schema = xmlschema.XMLSchema(
                 os.path.abspath(self.xsd_path),
-                base_url=base_dir
+                base_url=base_dir,
+                build=True,
+                locations={
+                    "http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes": 
+                    [f for f in xsd_files if "IATA_OffersAndOrdersCommonTypes.xsd" in f]
+                }
             )
         except Exception as e:
             raise ValueError(f"Failed to load XSD schema: {e}")
@@ -256,11 +267,22 @@ class XMLGenerator:
             
             attrs_str = ' '.join([f'{k}="{v}"' for k, v in attrs.items() if v is not None])
             
-            if namespace_prefix and self.schema and element_name == list(self.schema.elements.keys())[0]:
-                if attrs_str:
-                    attrs_str = f'{namespace_prefix} {attrs_str}'
-                else:
-                    attrs_str = namespace_prefix
+            if self.schema and element_name == list(self.schema.elements.keys())[0]:
+                namespace = self.schema.target_namespace
+                if namespace:
+                    namespace_attr = f'xmlns="{namespace}"'
+                    if attrs_str:
+                        attrs_str = f'{namespace_attr} {attrs_str}'
+                    else:
+                        attrs_str = namespace_attr
+                
+                for prefix, ns in self.schema.namespaces.items():
+                    if prefix and ns and prefix != 'xml':
+                        ns_attr = f'xmlns:{prefix}="{ns}"'
+                        if attrs_str:
+                            attrs_str = f'{attrs_str} {ns_attr}'
+                        else:
+                            attrs_str = ns_attr
             
             children = {}
             for k, v in data.items():
