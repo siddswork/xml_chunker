@@ -196,8 +196,7 @@ class XMLGenerator:
         
         if element.type.is_complex() and hasattr(element.type, 'content') and element.type.content is not None:
             try:
-                if element.name == "IATA_OrderViewRS":
-                    print(f"Handling special case for {element.name}")
+                if element.local_name == "IATA_OrderViewRS":
                     
                     error_dict = {}
                     error_dict["cns:LangCode"] = "EN"
@@ -225,7 +224,8 @@ class XMLGenerator:
                     result["_comment_PayloadAttributes"] = "Optional element"
                 
                 for child in element.type.content.iter_elements():
-                    if element.name == "IATA_OrderViewRS" and child.name in ["Error", "Response"]:
+                    if element.local_name == "IATA_OrderViewRS" and child.local_name in ["Error", "Response"]:
+                        # Skip processing these elements again since they're handled in the special case above
                         continue
                         
                     child_namespace = child.target_namespace
