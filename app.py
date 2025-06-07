@@ -56,7 +56,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def generate_xml_from_xsd(xsd_file_path: str, xsd_file_name: str) -> str:
+def generate_xml_from_xsd(xsd_file_path, xsd_file_name):
     """
     Generate XML from XSD schema.
     
@@ -70,15 +70,16 @@ def generate_xml_from_xsd(xsd_file_path: str, xsd_file_name: str) -> str:
     try:
         resource_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resource', '21_3_5_distribution_schemas')
         
-        temp_dir = os.path.dirname(xsd_file_path)
-        
-        for filename in os.listdir(resource_dir):
-            if filename.endswith('.xsd') and filename != xsd_file_name:
-                src_path = os.path.join(resource_dir, filename)
-                dst_path = os.path.join(temp_dir, filename)
-                with open(src_path, 'rb') as src_file:
-                    with open(dst_path, 'wb') as dst_file:
-                        dst_file.write(src_file.read())
+        if os.path.exists(resource_dir):
+            temp_dir = os.path.dirname(xsd_file_path)
+            
+            for filename in os.listdir(resource_dir):
+                if filename.endswith('.xsd') and filename != xsd_file_name:
+                    src_path = os.path.join(resource_dir, filename)
+                    dst_path = os.path.join(temp_dir, filename)
+                    with open(src_path, 'rb') as src_file:
+                        with open(dst_path, 'wb') as dst_file:
+                            dst_file.write(src_file.read())
         
         generator = XMLGenerator(xsd_file_path)
         return generator.generate_dummy_xml()
