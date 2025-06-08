@@ -203,7 +203,7 @@ def analyze_xsd_schema(xsd_file_path):
             'success': False
         }
 
-def extract_element_tree(element, element_name, level=0):
+def extract_element_tree(element, element_name, level=0, processed_types=None):
     """
     Extract element tree structure for display with improved depth and None handling.
     
@@ -211,10 +211,44 @@ def extract_element_tree(element, element_name, level=0):
         element: XSD element
         element_name: Name of the element
         level: Nesting level for indentation
+        processed_types: Set to track processed types and prevent circular references
         
     Returns:
         Dictionary containing tree structure
     """
+    # Initialize processed types set if not provided
+    if processed_types is None:
+        processed_types = set()
+    
+    # CRITICAL: Prevent circular references
+    if element and hasattr(element, 'type') and element.type:
+        type_key = f"{element_name}_{str(element.type)}"
+        if type_key in processed_types:
+            return {
+                'name': element_name,
+                'level': level,
+                'children': [],
+                'is_choice': False,
+                'choice_options': [],
+                'is_unbounded': False,
+                'occurs': {'min': 1, 'max': '1'},
+                '_circular_ref': f'Circular reference: {element_name}'
+            }
+        processed_types.add(type_key)
+    
+    # CRITICAL: Prevent stack overflow with strict depth limit
+    if level > 5:  # Reduced from 6 to 5
+        return {
+            'name': element_name,
+            'level': level,
+            'children': [],
+            'is_choice': False,
+            'choice_options': [],
+            'is_unbounded': False,
+            'occurs': {'min': 1, 'max': '1'},
+            '_depth_limit': 'Maximum depth reached'
+        }
+    
     # Safely get occurrence values with proper None handling
     min_occurs = getattr(element, 'min_occurs', 1) or 1
     max_occurs = getattr(element, 'max_occurs', 1)
@@ -245,7 +279,7 @@ def extract_element_tree(element, element_name, level=0):
         if (hasattr(element, 'type') and element.type and 
             element.type.is_complex() and 
             hasattr(element.type, 'content') and element.type.content and 
-            level < 6):
+            level < 4):  # Further reduced from 6 to 4
             
             choice_found = False
             
@@ -279,7 +313,7 @@ def extract_element_tree(element, element_name, level=0):
                 for item in element.type.content.iter_elements():
                     if (hasattr(item, 'local_name') and item.local_name and 
                         hasattr(item, 'type') and item.type):
-                        child_tree = extract_element_tree(item, item.local_name, level + 1)
+                        child_tree = extract_element_tree(item, item.local_name, level + 1, processed_types)
                         if child_tree and child_tree.get('name'):  # Only add valid trees
                             tree_data['children'].append(child_tree)
             except AttributeError:
@@ -289,7 +323,7 @@ def extract_element_tree(element, element_name, level=0):
                     if hasattr(element.type.content, '_group'):
                         for group_item in element.type.content._group:
                             if hasattr(group_item, 'local_name') and group_item.local_name:
-                                child_tree = extract_element_tree(group_item, group_item.local_name, level + 1)
+                                child_tree = extract_element_tree(group_item, group_item.local_name, level + 1, processed_types)
                                 if child_tree and child_tree.get('name'):
                                     tree_data['children'].append(child_tree)
                 except:
@@ -321,16 +355,21 @@ def extract_element_tree(element, element_name, level=0):
     
     return tree_data
 
-def extract_choice_elements(element):
+def extract_choice_elements(element, depth=0):
     """
     Extract choice elements from XSD element with enhanced information.
     
     Args:
         element: XSD element
+        depth: Current recursion depth
         
     Returns:
         List of choice information
     """
+    # Prevent infinite recursion
+    if depth > 3:
+        return []
+        
     choices = []
     try:
         if hasattr(element.type, 'content') and element.type.content:
@@ -358,7 +397,7 @@ def extract_choice_elements(element):
                 # Also check for direct elements that might be choice-like
                 elif hasattr(item, 'local_name'):
                     if hasattr(item, 'type') and item.type and item.type.is_complex():
-                        sub_choices = extract_choice_elements(item)
+                        sub_choices = extract_choice_elements(item, depth + 1)
                         choices.extend(sub_choices)
     except Exception:
         pass

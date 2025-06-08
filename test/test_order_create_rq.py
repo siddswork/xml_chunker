@@ -273,3 +273,59 @@ class TestOrderCreateRQValidation:
         closing_tags = xml_content.count('</IATA_OrderCreateRQ>')
         
         assert opening_tags == closing_tags == 1, "XML should have exactly one root element with matching opening/closing tags"
+
+
+class TestOrderCreateRQNewMethods:
+    """Test new methods added to XMLGenerator for OrderCreateRQ."""
+    
+    def test_generate_dummy_xml_with_choices_method_exists(self, xml_generator_order_create):
+        """Test that the new method exists and is callable."""
+        assert hasattr(xml_generator_order_create, 'generate_dummy_xml_with_choices')
+        assert callable(xml_generator_order_create.generate_dummy_xml_with_choices)
+    
+    def test_generate_dummy_xml_with_choices_empty_choices(self, xml_generator_order_create):
+        """Test XML generation with empty choices (OrderCreateRQ has fewer choices)."""
+        selected_choices = {}
+        unbounded_counts = {}
+        
+        xml_content = xml_generator_order_create.generate_dummy_xml_with_choices(
+            selected_choices, unbounded_counts
+        )
+        
+        assert xml_content is not None
+        assert not xml_content.startswith('<error>')
+        assert 'IATA_OrderCreateRQ' in xml_content
+        assert 'DistributionChain' in xml_content
+        assert 'Request' in xml_content
+    
+    def test_generate_dummy_xml_with_unbounded_counts_order_create(self, xml_generator_order_create):
+        """Test XML generation with unbounded counts for OrderCreateRQ elements."""
+        # OrderCreateRQ might have some repeating elements
+        unbounded_counts = {
+            'DistributionChain': 1,  # Usually not repeating but test the mechanism
+            'Request': 1
+        }
+        
+        xml_content = xml_generator_order_create.generate_dummy_xml_with_choices(None, unbounded_counts)
+        
+        assert xml_content is not None
+        assert not xml_content.startswith('<error>')
+        assert 'IATA_OrderCreateRQ' in xml_content
+    
+    def test_user_preferences_initialization(self, xml_generator_order_create):
+        """Test that user preferences are properly initialized."""
+        # Before calling the method, these attributes shouldn't exist
+        assert not hasattr(xml_generator_order_create, 'user_choices') or xml_generator_order_create.user_choices is None
+        
+        selected_choices = {'test': 'value'}
+        unbounded_counts = {'element': 2}
+        
+        xml_content = xml_generator_order_create.generate_dummy_xml_with_choices(
+            selected_choices, unbounded_counts
+        )
+        
+        # After calling, attributes should be set
+        assert hasattr(xml_generator_order_create, 'user_choices')
+        assert hasattr(xml_generator_order_create, 'user_unbounded_counts')
+        assert xml_generator_order_create.user_choices == selected_choices
+        assert xml_generator_order_create.user_unbounded_counts == unbounded_counts
