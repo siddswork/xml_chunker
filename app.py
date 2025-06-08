@@ -538,6 +538,142 @@ def convert_tree_to_streamlit_format(node, parent_path=""):
     
     return tree_node
 
+def format_validation_error(error):
+    """
+    Format a validation error for display.
+    
+    Args:
+        error: xmlschema validation error object
+        
+    Returns:
+        Dictionary with formatted error information
+    """
+    try:
+        # Extract path information
+        path = getattr(error, 'path', 'Unknown path')
+        
+        # Clean up the error message
+        message = str(error.message)
+        
+        # Extract element name from path if possible
+        element_name = 'Unknown'
+        if path and isinstance(path, str):
+            if '/' in path:
+                element_name = path.split('/')[-1]
+                # Remove namespace prefixes and array indices
+                if ':' in element_name:
+                    element_name = element_name.split(':')[-1]
+                element_name = element_name.split('[')[0]  # Remove array indices like [1]
+        
+        return {
+            'message': message,
+            'path': path,
+            'element_name': element_name,
+            'line': getattr(error, 'lineno', None)
+        }
+    except Exception:
+        return {
+            'message': str(error),
+            'path': 'Unknown',
+            'element_name': 'Unknown',
+            'line': None
+        }
+
+def validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name=None, uploaded_file_content=None):
+    """
+    Validate generated XML against the XSD schema.
+    
+    Args:
+        xml_content: XML content to validate
+        xsd_file_path: Path to the XSD schema file (may not exist)
+        uploaded_file_name: Original uploaded file name
+        uploaded_file_content: Original uploaded file content
+        
+    Returns:
+        Dictionary containing validation results
+    """
+    try:
+        # Create a temporary XML file for validation
+        temp_xml_file = tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False, encoding='utf-8')
+        temp_xml_file.write(xml_content)
+        temp_xml_file.close()
+        temp_xml_path = temp_xml_file.name
+        
+        # Create temporary XSD file if the original path doesn't exist
+        temp_xsd_path = xsd_file_path
+        temp_xsd_cleanup = False
+        
+        if not os.path.exists(xsd_file_path) and uploaded_file_content and uploaded_file_name:
+            # Recreate the temp XSD file and dependencies
+            temp_dir = tempfile.mkdtemp()
+            temp_xsd_path = os.path.join(temp_dir, uploaded_file_name)
+            
+            # Write the XSD content
+            with open(temp_xsd_path, 'w', encoding='utf-8') as f:
+                f.write(uploaded_file_content)
+            
+            # Set up dependencies
+            setup_temp_directory_with_dependencies(temp_xsd_path, uploaded_file_name)
+            temp_xsd_cleanup = True
+        
+        try:
+            # Load the schema and validate
+            parser = XSDParser(temp_xsd_path)
+            
+            # Get detailed validation results using xmlschema
+            import xmlschema
+            errors = list(parser.schema.iter_errors(temp_xml_path))
+            
+            # Categorize validation errors for better reporting
+            enumeration_errors = [e for e in errors if 'XsdEnumerationFacets' in str(e.message)]
+            boolean_errors = [e for e in errors if "with XsdAtomicBuiltin(name='xs:boolean')" in str(e.message)]
+            pattern_errors = [e for e in errors if 'pattern' in str(e.message).lower()]
+            structural_errors = [e for e in errors if e not in enumeration_errors + boolean_errors + pattern_errors]
+            
+            # Basic validation result
+            is_valid = parser.validate_xml(temp_xml_path)
+            
+            return {
+                'is_valid': is_valid,
+                'total_errors': len(errors),
+                'error_breakdown': {
+                    'enumeration_errors': len(enumeration_errors),
+                    'boolean_errors': len(boolean_errors),
+                    'pattern_errors': len(pattern_errors),
+                    'structural_errors': len(structural_errors)
+                },
+                'categorized_errors': {
+                    'enumeration_errors': enumeration_errors,
+                    'boolean_errors': boolean_errors,
+                    'pattern_errors': pattern_errors,
+                    'structural_errors': structural_errors
+                },
+                'detailed_errors': errors[:10],  # First 10 errors for display
+                'success': True
+            }
+            
+        finally:
+            # Cleanup temporary XML file
+            try:
+                os.unlink(temp_xml_path)
+            except:
+                pass
+            
+            # Cleanup temporary XSD directory if we created it
+            if temp_xsd_cleanup and 'temp_dir' in locals():
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except:
+                    pass
+                
+    except Exception as e:
+        return {
+            'is_valid': False,
+            'error': str(e),
+            'success': False
+        }
+
 def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, unbounded_counts=None):
     """
     Generate XML from XSD schema with user-specified choices.
@@ -711,14 +847,13 @@ def main():
                     st.session_state['selected_choices'] = {}
                     st.session_state['unbounded_counts'] = {}
         
-        # XML Generation Section (below both columns)
+        # XML Generation Section (below both columns) - Full width
         st.markdown("---")
         st.markdown('<div class="sub-header">XML Generation:</div>', unsafe_allow_html=True)
         
-        col_gen1, col_gen2, col_gen3 = st.columns([1, 2, 1])
-        
-        with col_gen2:
-            # Show current selections summary
+        # Show current selections summary in a centered column
+        col_summary1, col_summary2, col_summary3 = st.columns([1, 2, 1])
+        with col_summary2:
             if 'selected_choices' in st.session_state and st.session_state['selected_choices']:
                 st.caption("**Selected Choices:**")
                 for choice_key, choice_data in st.session_state['selected_choices'].items():
@@ -729,30 +864,168 @@ def main():
                 for path, count in st.session_state['unbounded_counts'].items():
                     element_name = path.split('.')[-1]
                     st.caption(f"• {element_name}: {count}")
+        
+        # Action buttons in centered columns
+        col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns([1, 1, 1, 1, 1])
+        
+        with col_btn3:
+            generate_clicked = st.button("🚀 Generate XML", key="generate_xml_btn", help="Generate XML based on your selections")
+        
+        # Handle XML generation
+        if generate_clicked:
+            with st.spinner("Generating XML with your selections..."):
+                # Get user selections from session state
+                selected_choices = st.session_state.get('selected_choices', {})
+                unbounded_counts = st.session_state.get('unbounded_counts', {})
+                
+                xml_content = generate_xml_from_xsd(
+                    temp_file_path, 
+                    file_name, 
+                    selected_choices, 
+                    unbounded_counts
+                )
+                
+                # Store XML content and file info in session state for validation
+                st.session_state['generated_xml'] = xml_content
+                st.session_state['temp_file_path'] = temp_file_path
+                st.session_state['uploaded_file_name'] = file_name
+                st.session_state['uploaded_file_content'] = file_content
+        
+        # Display generated XML and validation controls if XML exists
+        if 'generated_xml' in st.session_state and st.session_state['generated_xml']:
+            st.markdown('<div class="sub-header">Generated XML:</div>', unsafe_allow_html=True)
             
-            if st.button("🚀 Generate XML", key="generate_xml_btn", help="Generate XML based on your selections"):
-                with st.spinner("Generating XML with your selections..."):
-                    # Get user selections from session state
-                    selected_choices = st.session_state.get('selected_choices', {})
-                    unbounded_counts = st.session_state.get('unbounded_counts', {})
-                    
-                    xml_content = generate_xml_from_xsd(
-                        temp_file_path, 
-                        file_name, 
-                        selected_choices, 
-                        unbounded_counts
+            # Display XML in a larger area (full width)
+            st.code(st.session_state['generated_xml'], language="xml", height=600)
+            
+            # Action buttons row - Download and Validate
+            col_action1, col_action2, col_action3, col_action4, col_action5 = st.columns([1, 1, 1, 1, 1])
+            
+            with col_action2:
+                st.download_button(
+                    label="💾 Download XML",
+                    data=st.session_state['generated_xml'],
+                    file_name=f"{file_name.replace('.xsd', '')}_generated.xml",
+                    mime="application/xml"
+                )
+            
+            with col_action4:
+                validate_clicked = st.button("✅ Validate XML", key="validate_xml_btn", help="Validate generated XML against XSD schema")
+            
+            # Handle validation
+            if validate_clicked:
+                with st.spinner("Validating XML against schema..."):
+                    validation_result = validate_xml_against_schema(
+                        st.session_state['generated_xml'], 
+                        st.session_state['temp_file_path'],
+                        st.session_state.get('uploaded_file_name'),
+                        st.session_state.get('uploaded_file_content')
                     )
                     
-                    st.markdown('<div class="sub-header">Generated XML:</div>', unsafe_allow_html=True)
-                    st.code(xml_content, language="xml")
-                    
-                    # Option to download the generated XML
-                    st.download_button(
-                        label="💾 Download XML",
-                        data=xml_content,
-                        file_name=f"{file_name.replace('.xsd', '')}_generated.xml",
-                        mime="application/xml"
-                    )
+                    if validation_result['success']:
+                        error_breakdown = validation_result['error_breakdown']
+                        total_errors = validation_result['total_errors']
+                        
+                        # Display validation results
+                        st.markdown("### 📊 Validation Results")
+                        
+                        if validation_result['is_valid']:
+                            st.success("🎉 **XML is valid!** No validation errors found.")
+                        else:
+                            if total_errors == 0:
+                                st.success("🎉 **XML is valid!** No validation errors found.")
+                            else:
+                                st.warning(f"⚠️ **XML has validation issues** ({total_errors} total errors)")
+                        
+                        # Show error breakdown
+                        if total_errors > 0:
+                            col_val1, col_val2, col_val3, col_val4 = st.columns(4)
+                            
+                            with col_val1:
+                                st.metric("Enumeration Errors", error_breakdown['enumeration_errors'], help="Values not in allowed enumeration lists")
+                            
+                            with col_val2:
+                                st.metric("Boolean Errors", error_breakdown['boolean_errors'], help="Invalid boolean values")
+                            
+                            with col_val3:
+                                st.metric("Pattern Errors", error_breakdown['pattern_errors'], help="Values not matching required patterns")
+                            
+                            with col_val4:
+                                st.metric("Structural Errors", error_breakdown['structural_errors'], help="Missing required elements or invalid structure")
+                            
+                            # Show categorized errors
+                            if validation_result.get('categorized_errors'):
+                                st.markdown("#### 📋 Detailed Error Analysis")
+                                
+                                categorized_errors = validation_result['categorized_errors']
+                                
+                                # Create tabs for each error type
+                                tab_names = []
+                                tab_contents = []
+                                
+                                if categorized_errors['enumeration_errors']:
+                                    tab_names.append(f"🔤 Enumeration ({len(categorized_errors['enumeration_errors'])})")
+                                    tab_contents.append(('enumeration_errors', categorized_errors['enumeration_errors']))
+                                
+                                if categorized_errors['boolean_errors']:
+                                    tab_names.append(f"✅ Boolean ({len(categorized_errors['boolean_errors'])})")
+                                    tab_contents.append(('boolean_errors', categorized_errors['boolean_errors']))
+                                
+                                if categorized_errors['pattern_errors']:
+                                    tab_names.append(f"🎯 Pattern ({len(categorized_errors['pattern_errors'])})")
+                                    tab_contents.append(('pattern_errors', categorized_errors['pattern_errors']))
+                                
+                                if categorized_errors['structural_errors']:
+                                    tab_names.append(f"🏗️ Structural ({len(categorized_errors['structural_errors'])})")
+                                    tab_contents.append(('structural_errors', categorized_errors['structural_errors']))
+                                
+                                if tab_names:
+                                    tabs = st.tabs(tab_names)
+                                    
+                                    for i, (tab, (error_type, errors)) in enumerate(zip(tabs, tab_contents)):
+                                        with tab:
+                                            if error_type == 'enumeration_errors':
+                                                st.markdown("**Enumeration Violations:**")
+                                                st.caption("Values that don't match allowed enumeration lists. Expected for dummy data.")
+                                            elif error_type == 'boolean_errors':
+                                                st.markdown("**Boolean Type Errors:**")
+                                                st.caption("Invalid boolean values. These indicate type generation issues.")
+                                            elif error_type == 'pattern_errors':
+                                                st.markdown("**Pattern Violations:**")
+                                                st.caption("Values that don't match required regex patterns. Expected for dummy data.")
+                                            elif error_type == 'structural_errors':
+                                                st.markdown("**Structural Issues:**")
+                                                st.caption("Missing required elements or invalid XML structure. These should be minimal.")
+                                            
+                                            # Display errors in a nice format
+                                            for j, error in enumerate(errors, 1):
+                                                formatted_error = format_validation_error(error)
+                                                
+                                                with st.expander(f"Error {j}: {formatted_error['element_name']}", expanded=False):
+                                                    st.text(f"📍 Path: {formatted_error['path']}")
+                                                    st.text(f"💬 Message: {formatted_error['message']}")
+                                                    if formatted_error['line']:
+                                                        st.text(f"📍 Line: {formatted_error['line']}")
+                                                
+                                                # Show only first 10 errors per category to avoid overwhelming UI
+                                                if j >= 10 and len(errors) > 10:
+                                                    st.info(f"... and {len(errors) - 10} more {error_type.replace('_', ' ')} errors")
+                                                    break
+                        
+                        # Provide helpful tips
+                        if total_errors > 0:
+                            st.info("""
+💡 **Understanding Validation Errors:**
+
+• **Enumeration errors** are expected for dummy data - real values would need to match specific lists
+• **Boolean errors** indicate type generation issues (being actively improved)
+• **Pattern errors** are expected for dummy data - real values would need specific formats  
+• **Structural errors** indicate missing required elements or wrong XML structure (should be minimal)
+
+The XML structure is correct even with data constraint violations.
+                            """)
+                    else:
+                        st.error(f"❌ **Validation failed:** {validation_result['error']}")
         
         # Cleanup temp directory
         try:

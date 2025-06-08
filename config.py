@@ -39,8 +39,8 @@ class DataGeneration:
     # Date/time patterns
     date_patterns: Dict[str, str] = None
     
-    # Boolean defaults
-    boolean_default: bool = True
+    # Boolean defaults (XML Schema format - lowercase strings)
+    boolean_default: str = "true"
     
     # Default string length
     default_string_length: int = 10
@@ -265,10 +265,19 @@ class Config:
             return 123
         
         elif data_type in ['date', 'datetime', 'time']:
-            for pattern, value in self.data_generation.date_patterns.items():
-                if pattern in element_name_lower:
-                    return value
-            return self.data_generation.date_patterns['date']
+            # Check for specific element name patterns in priority order (most specific first)
+            if 'timestamp' in element_name_lower or 'datetime' in element_name_lower:
+                return self.data_generation.date_patterns['datetime']
+            elif data_type == 'datetime':
+                return self.data_generation.date_patterns['datetime']
+            elif data_type == 'time' and 'time' in element_name_lower and 'datetime' not in element_name_lower:
+                return self.data_generation.date_patterns['time']
+            elif data_type == 'time':
+                return self.data_generation.date_patterns['time']
+            elif data_type == 'date':
+                return self.data_generation.date_patterns['date']
+            else:
+                return self.data_generation.date_patterns['date']
         
         elif data_type == 'boolean':
             return self.data_generation.boolean_default
