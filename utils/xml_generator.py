@@ -122,19 +122,26 @@ class XMLGenerator:
         # Extract facets (length, pattern, min/max values)
         if hasattr(type_name, 'facets') and type_name.facets:
             for facet_name, facet in type_name.facets.items():
-                if facet_name == 'maxLength':
+                # Skip None facet names
+                if facet_name is None:
+                    continue
+                    
+                # Handle both namespaced and simple facet names
+                local_name = facet_name.split('}')[-1] if '}' in str(facet_name) else str(facet_name)
+                
+                if local_name == 'maxLength':
                     constraints['max_length'] = facet.value
-                elif facet_name == 'minLength':
+                elif local_name == 'minLength':
                     constraints['min_length'] = facet.value
-                elif facet_name == 'length':
+                elif local_name == 'length':
                     constraints['exact_length'] = facet.value
-                elif facet_name == 'pattern':
+                elif local_name == 'pattern':
                     constraints['pattern'] = facet.value
-                elif facet_name == 'minInclusive':
+                elif local_name == 'minInclusive':
                     constraints['min_value'] = facet.value
-                elif facet_name == 'maxInclusive':
+                elif local_name == 'maxInclusive':
                     constraints['max_value'] = facet.value
-                elif facet_name == 'enumeration':
+                elif local_name == 'enumeration':
                     if 'enum_values' not in constraints:
                         constraints['enum_values'] = []
                     constraints['enum_values'].append(str(facet.value))
@@ -274,15 +281,24 @@ class XMLGenerator:
         # Check user preferences
         if hasattr(self, 'user_choices') and self.user_choices:
             for choice_key, choice_data in self.user_choices.items():
-                user_path = choice_data.get('path')
-                # Check for exact match or if the parent_path ends with the user_path
-                if (user_path == parent_path or 
-                    parent_path.endswith(f".{user_path}") or
-                    parent_path.endswith(user_path)):
-                    selected_name = choice_data.get('selected_element')
-                    for elem in choice_elements:
-                        if elem.local_name == selected_name:
-                            return elem
+                # Handle both formats: {"Response": True} and {"key": {"path": ..., "selected_element": ...}}
+                if isinstance(choice_data, bool):
+                    # Simple format: look for element with matching name
+                    if choice_data:  # If True, select this choice
+                        for elem in choice_elements:
+                            if elem.local_name == choice_key:
+                                return elem
+                elif isinstance(choice_data, dict):
+                    # Complex format: with path and selected_element
+                    user_path = choice_data.get('path')
+                    # Check for exact match or if the parent_path ends with the user_path
+                    if (user_path == parent_path or 
+                        parent_path.endswith(f".{user_path}") or
+                        parent_path.endswith(user_path)):
+                        selected_name = choice_data.get('selected_element')
+                        for elem in choice_elements:
+                            if elem.local_name == selected_name:
+                                return elem
         
         # Default: select first element
         return choice_elements[0]
@@ -320,7 +336,9 @@ class XMLGenerator:
             
             # Handle null type
             if element.type is None:
-                return self._generate_deterministic_string(element.local_name)
+                # Use string generator for unknown types
+                string_gen = self.type_factory.create_generator("string", {})
+                return string_gen.generate(element.local_name, {})
             
             # Process simple types
             if element.type.is_simple():

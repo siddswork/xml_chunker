@@ -163,7 +163,15 @@ class StringTypeGenerator(BaseTypeGenerator):
         if self.config and element_name:
             base_value = str(self.config.get_data_pattern(element_name, 'string'))
         else:
-            base_value = f"Sample{element_name}" if element_name else "SampleText"
+            # Create shorter default based on element name to avoid length issues
+            if element_name:
+                # Use just the element name without "Sample" prefix if it's long
+                if len(element_name) <= 10:
+                    base_value = f"S{element_name}"  # Shorter prefix
+                else:
+                    base_value = element_name[:8]  # Just use first 8 chars of element name
+            else:
+                base_value = "SampleTxt"  # Shorter default
         
         # Apply constraints
         return self.validate_constraints(base_value, constraints)
@@ -179,17 +187,7 @@ class StringTypeGenerator(BaseTypeGenerator):
         if not constraints:
             return value
         
-        # Handle length constraints
-        if 'max_length' in constraints:
-            max_len = constraints['max_length']
-            if len(value) > max_len:
-                value = value[:max_len]
-        
-        if 'min_length' in constraints:
-            min_len = constraints['min_length']
-            if len(value) < min_len:
-                value = value.ljust(min_len, 'X')
-        
+        # Handle exact length first (most restrictive)
         if 'exact_length' in constraints:
             exact_len = constraints['exact_length']
             if len(value) != exact_len:
@@ -197,19 +195,49 @@ class StringTypeGenerator(BaseTypeGenerator):
                     value = value[:exact_len]
                 else:
                     value = value.ljust(exact_len, 'X')
+            return value  # Return early since exact length overrides min/max
+        
+        # Handle max length constraint
+        if 'max_length' in constraints:
+            max_len = constraints['max_length']
+            if len(value) > max_len:
+                # Try to create a meaningful shorter value
+                if max_len >= 3:
+                    value = value[:max_len]
+                else:
+                    # For very short limits, use simple values
+                    value = 'X' * max_len
+        
+        # Handle min length constraint
+        if 'min_length' in constraints:
+            min_len = constraints['min_length']
+            if len(value) < min_len:
+                # Pad with meaningful characters
+                padding_needed = min_len - len(value)
+                value = value + ('X' * padding_needed)
         
         # Handle pattern constraints
         if 'pattern' in constraints:
             pattern = constraints['pattern']
-            if not re.match(pattern, value):
-                # For common patterns, generate compliant values
-                if pattern == r'[A-Z]{3}':  # Country/currency codes
-                    value = 'USD'
-                elif pattern == r'[A-Z]{2}':
-                    value = 'US'
-                else:
-                    # Keep original value as fallback
-                    pass
+            try:
+                # Ensure pattern is a string
+                pattern_str = str(pattern) if pattern is not None else ""
+                if pattern_str and not re.match(pattern_str, value):
+                    # For common patterns, generate compliant values
+                    if pattern_str == r'[A-Z]{3}':  # Country/currency codes
+                        value = 'USD'
+                    elif pattern_str == r'[A-Z]{2}':
+                        value = 'US'
+                    elif pattern_str == r'[A-Za-z]{2}':
+                        value = 'EN'
+                    elif pattern_str == r'\d+':  # Numeric strings
+                        value = '123'
+                    else:
+                        # Keep original value as fallback
+                        pass
+            except re.error:
+                # Invalid regex pattern, skip pattern validation
+                pass
         
         return value
 
@@ -248,32 +276,83 @@ class TypeGeneratorFactory:
     def __init__(self, config_instance=None):
         self.config = config_instance
     
-    def create_generator(self, xsd_type_name: str, constraints: Optional[Dict] = None) -> BaseTypeGenerator:
+    def create_generator(self, xsd_type_name, constraints: Optional[Dict] = None) -> BaseTypeGenerator:
         """Create appropriate generator based on XSD type."""
-        type_str = str(xsd_type_name).lower()
-        
         # Handle enumeration types first
         if constraints and 'enum_values' in constraints:
             return EnumerationTypeGenerator(self.config, constraints['enum_values'])
         
-        # Numeric types
+        # Handle xmlschema type objects with proper introspection
+        if hasattr(xsd_type_name, 'primitive_type') and xsd_type_name.primitive_type:
+            primitive_type = xsd_type_name.primitive_type
+            if hasattr(primitive_type, 'name'):
+                primitive_name = str(primitive_type.name).lower()
+                
+                # Check exact primitive type names for precise matching
+                if 'boolean' in primitive_name:
+                    return BooleanTypeGenerator(self.config)
+                elif 'decimal' in primitive_name:
+                    return NumericTypeGenerator(self.config, is_decimal=True)
+                elif 'integer' in primitive_name:
+                    return NumericTypeGenerator(self.config, is_decimal=False)
+                elif 'datetime' in primitive_name:
+                    return DateTimeTypeGenerator(self.config, 'datetime')
+                elif 'date' in primitive_name:
+                    return DateTimeTypeGenerator(self.config, 'date')
+                elif 'time' in primitive_name:
+                    return DateTimeTypeGenerator(self.config, 'time')
+                elif any(t in primitive_name for t in ['float', 'double']):
+                    return NumericTypeGenerator(self.config, is_decimal=True)
+                elif any(t in primitive_name for t in ['string', 'token', 'normalizedstring']):
+                    return StringTypeGenerator(self.config)
+        
+        # Check base type for type restrictions (like IndType based on boolean)
+        if hasattr(xsd_type_name, 'base_type') and xsd_type_name.base_type:
+            base_str = str(xsd_type_name.base_type).lower()
+            if 'boolean' in base_str:
+                return BooleanTypeGenerator(self.config)
+        
+        # Check for boolean-related type names (IndType, FlagType, etc.)
+        if hasattr(xsd_type_name, 'name') and xsd_type_name.name:
+            type_name = str(xsd_type_name.name).lower()
+            if 'ind' in type_name or 'flag' in type_name:
+                return BooleanTypeGenerator(self.config)
+        
+        # String-based fallback detection
+        type_str = str(xsd_type_name).lower()
+        
+        # Enhanced string-based type detection with more specific patterns
+        if 'xsdatomicbuiltin' in type_str:
+            # Extract the actual type from XsdAtomicBuiltin(name='xs:type')
+            if "'xs:decimal'" in type_str or "'xs:float'" in type_str or "'xs:double'" in type_str:
+                return NumericTypeGenerator(self.config, is_decimal=True)
+            elif "'xs:integer'" in type_str or "'xs:int'" in type_str or "'xs:long'" in type_str:
+                return NumericTypeGenerator(self.config, is_decimal=False)
+            elif "'xs:datetime'" in type_str:
+                return DateTimeTypeGenerator(self.config, 'datetime')
+            elif "'xs:date'" in type_str:
+                return DateTimeTypeGenerator(self.config, 'date')
+            elif "'xs:time'" in type_str:
+                return DateTimeTypeGenerator(self.config, 'time')
+            elif "'xs:boolean'" in type_str:
+                return BooleanTypeGenerator(self.config)
+            elif "'xs:string'" in type_str or "'xs:token'" in type_str:
+                return StringTypeGenerator(self.config)
+        
+        # Fallback string-based detection
         if any(t in type_str for t in ['decimal', 'float', 'double']):
             return NumericTypeGenerator(self.config, is_decimal=True)
         elif any(t in type_str for t in ['integer', 'int', 'long', 'short']):
             return NumericTypeGenerator(self.config, is_decimal=False)
-        
-        # Boolean types
         elif 'boolean' in type_str:
             return BooleanTypeGenerator(self.config)
-        
-        # Date/time types
         elif 'datetime' in type_str:
             return DateTimeTypeGenerator(self.config, 'datetime')
         elif 'date' in type_str:
             return DateTimeTypeGenerator(self.config, 'date')
         elif 'time' in type_str:
             return DateTimeTypeGenerator(self.config, 'time')
-        
-        # String types (default)
+        elif 'anyuri' in type_str:
+            return StringTypeGenerator(self.config)  # URIs are strings
         else:
             return StringTypeGenerator(self.config)
