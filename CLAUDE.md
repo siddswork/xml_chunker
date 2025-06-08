@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-XML Chunker is a Streamlit application for parsing XSD schemas and generating dummy XML files. The application processes IATA NDC (New Distribution Capability) XSD schemas and creates valid XML instances with sample data.
+XML Chunker is a Streamlit application for parsing XSD schemas and generating dummy XML files. The application processes IATA NDC (New Distribution Capability) XSD schemas, analyzes their structure (including choice elements), and creates valid XML instances with sample data.
 
 ## Common Commands
 
@@ -63,10 +63,13 @@ The application is specifically designed for IATA NDC schemas with:
 
 ### Key Features
 
+- **Schema Analysis**: Real-time analysis of XSD structure showing choice elements, root elements, and schema information
+- **Choice Element Detection**: Identifies and displays all choice elements with their occurrence constraints
 - **Schema Dependency Management**: Automatically resolves XSD imports by copying related schema files
 - **Random Data Generation**: Type-aware value generation for realistic XML instances
 - **Occurrence Constraints**: Handles minOccurs/maxOccurs with appropriate XML comments
 - **Namespace Support**: Proper namespace prefix handling for complex IATA schemas
+- **Download Support**: Generated XML can be downloaded directly from the interface
 - **Error Handling**: Graceful fallbacks when schema processing fails
 
 ## Development Notes
