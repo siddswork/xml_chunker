@@ -5,9 +5,13 @@ import tempfile
 from utils.xml_generator import XMLGenerator
 from utils.xsd_parser import XSDParser
 from streamlit_tree_select import tree_select
+from config import get_config
+
+# Initialize configuration
+config = get_config()
 
 st.set_page_config(
-    page_title="XML Chunker",
+    page_title=config.ui.default_page_title,
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -128,7 +132,7 @@ def setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name):
         xsd_file_name: Original name of the XSD file
     """
     try:
-        resource_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resource', '21_3_5_distribution_schemas')
+        resource_dir = config.get_resource_dir('iata')
         
         if not os.path.exists(resource_dir):
             print(f"Warning: Resource directory not found: {resource_dir}")
@@ -237,7 +241,7 @@ def extract_element_tree(element, element_name, level=0, processed_types=None):
         processed_types.add(type_key)
     
     # CRITICAL: Prevent stack overflow with strict depth limit
-    if level > 5:  # Reduced from 6 to 5
+    if level > config.recursion.max_tree_depth:
         return {
             'name': element_name,
             'level': level,
@@ -279,7 +283,7 @@ def extract_element_tree(element, element_name, level=0, processed_types=None):
         if (hasattr(element, 'type') and element.type and 
             element.type.is_complex() and 
             hasattr(element.type, 'content') and element.type.content and 
-            level < 4):  # Further reduced from 6 to 4
+            level < config.ui.default_tree_depth):
             
             choice_found = False
             
@@ -329,15 +333,21 @@ def extract_element_tree(element, element_name, level=0, processed_types=None):
                 except:
                     pass
                         
-            # Special handling for IATA schemas - detect Error/Response pattern
-            if not choice_found and element_name and 'OrderViewRS' in element_name:
+            # Special handling for schema-specific patterns - detect choice patterns
+            if not choice_found and element_name:
                 child_names = [child['name'] for child in tree_data['children']]
-                if 'Error' in child_names and 'Response' in child_names:
+                choice_patterns = config.get_choice_patterns('iata')
+                
+                # Check if all choice patterns are present in children
+                if choice_patterns and all(pattern in child_names for pattern in choice_patterns):
                     tree_data['is_choice'] = True
-                    tree_data['choice_options'] = [
-                        {'name': 'Error', 'min_occurs': 1, 'max_occurs': 'unbounded'},
-                        {'name': 'Response', 'min_occurs': 1, 'max_occurs': '1'}
-                    ]
+                    tree_data['choice_options'] = []
+                    for pattern in choice_patterns:
+                        tree_data['choice_options'].append({
+                            'name': pattern, 
+                            'min_occurs': 1, 
+                            'max_occurs': 'unbounded' if pattern == 'Error' else '1'
+                        })
         
         # Handle simple types - just show type info
         elif hasattr(element, 'type') and element.type and element.type.is_simple():
@@ -685,8 +695,8 @@ def main():
                                 count = st.number_input(
                                     f"{elem['name']} (max: {max_display}):",
                                     min_value=1,
-                                    max_value=10 if elem['max_occurs'] == 'unbounded' else min(10, int(elem['max_occurs'])),
-                                    value=2,
+                                    max_value=config.elements.max_unbounded_count if elem['max_occurs'] == 'unbounded' else min(config.elements.max_unbounded_count, int(elem['max_occurs'])),
+                                    value=config.elements.default_element_count,
                                     key=f"count_{elem['path']}",
                                     help=f"Number of {elem['name']} elements to generate"
                                 )

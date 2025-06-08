@@ -141,7 +141,7 @@ class TestOrderViewRSErrorHandling:
         """Test handling of invalid schema path."""
         from utils.xml_generator import XMLGenerator
         
-        with pytest.raises(ValueError, match="Failed to load XSD schema"):
+        with pytest.raises(ValueError, match="XSD file not found"):
             XMLGenerator("/nonexistent/path/schema.xsd")
 
 

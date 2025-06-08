@@ -12,21 +12,24 @@ from typing import Dict, Any, Optional, Union, List, Tuple, Set
 from datetime import datetime
 import xmlschema
 from lxml import etree
+from config import get_config
 
 
 class XMLGenerator:
     """Universal class for generating dummy XML files from any XSD schema with deep recursive parsing."""
     
-    def __init__(self, xsd_path: str):
+    def __init__(self, xsd_path: str, config_instance=None):
         """
         Initialize the universal XML generator.
         
         Args:
             xsd_path: Path to the XSD schema file
+            config_instance: Configuration instance (uses global config if None)
         """
         self.xsd_path = xsd_path
         self.schema = None
         self.processed_types = set()  # Track processed types to prevent infinite recursion
+        self.config = config_instance or get_config()
         self._load_schema()
     
     def _load_schema(self) -> None:
@@ -56,14 +59,18 @@ class XMLGenerator:
             except OSError as e:
                 print(f"Warning: Could not list directory {base_dir}: {e}")
             
-            # Create locations mapping for common IATA imports
+            # Create locations mapping for schema-specific imports
             locations = {}
+            namespace_mappings = self.config.get_namespace_mapping('iata')
+            
             for xsd_file in xsd_files:
                 try:
                     filename = os.path.basename(xsd_file)
                     if "CommonTypes" in filename:
-                        # Map common namespace patterns
-                        locations["http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes"] = [xsd_file]
+                        # Map namespace patterns from config
+                        common_types_ns = namespace_mappings.get('common_types')
+                        if common_types_ns:
+                            locations[common_types_ns] = [xsd_file]
                 except Exception as e:
                     print(f"Warning: Could not process XSD file {xsd_file}: {e}")
             
@@ -87,75 +94,44 @@ class XMLGenerator:
             raise ValueError(f"Failed to load XSD schema: {e}")
     
     def _generate_deterministic_string(self, element_name: str = "", context: str = "") -> str:
-        """Generate a deterministic string based on element name and context."""
+        """Generate a deterministic string based on element name and context using config patterns."""
         if not element_name:
             return "SampleText"
         
-        name_lower = element_name.lower()
-        if 'code' in name_lower:
-            return "ABC123"
-        elif 'id' in name_lower:
-            return f"{element_name}123456"
-        elif 'name' in name_lower:
-            return f"Sample{element_name}"
-        elif 'text' in name_lower or 'desc' in name_lower:
-            return f"Sample {element_name} description"
-        elif 'uri' in name_lower or 'url' in name_lower:
-            return "https://example.com/sample"
-        elif 'email' in name_lower:
-            return "sample@example.com"
-        elif 'currency' in name_lower:
-            return "USD"
-        elif 'lang' in name_lower:
-            return "EN"
-        elif 'version' in name_lower:
-            return "1.0"
-        elif 'type' in name_lower:
-            return "Standard"
-        else:
-            return f"Sample{element_name}"
+        # Use config-based data generation
+        return self.config.get_data_pattern(element_name, 'string')
     
     def _generate_deterministic_number(self, element_name: str = "") -> int:
-        """Generate a deterministic number based on element name."""
-        name_lower = element_name.lower() if element_name else ""
-        if 'count' in name_lower or 'number' in name_lower:
-            return 5
-        elif 'amount' in name_lower or 'price' in name_lower:
-            return 100
-        elif 'version' in name_lower:
-            return 1
-        elif 'sequence' in name_lower:
-            return 1
-        else:
+        """Generate a deterministic number based on element name using config patterns."""
+        if not element_name:
             return 123
+        
+        # Use config-based data generation
+        return self.config.get_data_pattern(element_name, 'int')
     
     def _generate_deterministic_decimal(self, element_name: str = "") -> float:
-        """Generate a deterministic decimal based on element name."""
-        name_lower = element_name.lower() if element_name else ""
-        if 'amount' in name_lower or 'price' in name_lower:
+        """Generate a deterministic decimal based on element name using config patterns."""
+        if not element_name:
             return 99.99
-        elif 'rate' in name_lower:
-            return 0.15
-        elif 'percentage' in name_lower:
-            return 10.5
-        else:
-            return 123.45
+        
+        # Use config-based data generation (convert int to float)
+        return float(self.config.get_data_pattern(element_name, 'int'))
     
     def _generate_deterministic_date(self, element_name: str = "") -> str:
-        """Generate a deterministic date in ISO format."""
-        return "2024-01-15"
+        """Generate a deterministic date in ISO format using config patterns."""
+        return self.config.get_data_pattern(element_name or 'date', 'date')
     
     def _generate_deterministic_datetime(self, element_name: str = "") -> str:
-        """Generate a deterministic datetime in ISO format."""
-        return "2024-01-15T10:30:00"
+        """Generate a deterministic datetime in ISO format using config patterns."""
+        return self.config.get_data_pattern(element_name or 'datetime', 'datetime')
     
     def _generate_deterministic_time(self, element_name: str = "") -> str:
-        """Generate a deterministic time."""
-        return "10:30:00"
+        """Generate a deterministic time using config patterns."""
+        return self.config.get_data_pattern(element_name or 'time', 'time')
     
     def _generate_deterministic_boolean(self, element_name: str = "") -> bool:
-        """Generate a deterministic boolean value."""
-        return True
+        """Generate a deterministic boolean value using config patterns."""
+        return self.config.get_data_pattern(element_name or 'boolean', 'boolean')
     
     def _generate_value_for_type(self, type_name: str, element_name: str = "") -> Any:
         """Generate a deterministic value based on the XSD type."""
@@ -226,19 +202,19 @@ class XMLGenerator:
                 if path in self.user_unbounded_counts:
                     user_count = max(1, self.user_unbounded_counts[path])
                     # Limit based on depth to prevent exponential growth
-                    if depth > 8:
+                    if depth > self.config.recursion.max_element_depth:
                         return min(user_count, 1)  # Force single element at deep levels
-                    elif depth > 5:
+                    elif depth > self.config.recursion.max_tree_depth:
                         return min(user_count, 2)  # Limit to 2 at moderate depth
                     return user_count
         
         # Depth-aware default count to prevent exponential growth
-        if depth > 8:
+        if depth > self.config.recursion.max_element_depth:
             return 1  # Only 1 element at very deep levels
-        elif depth > 5:
+        elif depth > self.config.recursion.max_tree_depth:
             return 1  # Reduce to 1 at moderate depth
         else:
-            return 2  # Default: 2 only at shallow levels
+            return self.config.elements.default_element_count  # Default from config
     
     def _get_namespace_prefix(self, namespace: str) -> Optional[str]:
         """Get the prefix for a given namespace."""
@@ -291,14 +267,15 @@ class XMLGenerator:
                             for child in group.iter_elements():
                                 choice_elements.append(child)
                 else:
-                    # For IATA schemas, Error and Response are typically mutually exclusive
-                    # Check if we have both Error and Response elements
+                    # For schema-specific patterns, check for configured choice patterns
                     all_elements = list(element.type.content.iter_elements())
                     element_names = [e.local_name for e in all_elements]
-                    if 'Error' in element_names and 'Response' in element_names:
-                        # These are mutually exclusive choices in IATA schemas
+                    choice_patterns = self.config.get_choice_patterns('iata')
+                    
+                    if choice_patterns and all(pattern in element_names for pattern in choice_patterns):
+                        # These are mutually exclusive choices based on config
                         for elem in all_elements:
-                            if elem.local_name in ['Error', 'Response']:
+                            if elem.local_name in choice_patterns:
                                 choice_elements.append(elem)
             except:
                 pass
@@ -338,16 +315,16 @@ class XMLGenerator:
             Dictionary with element structure and appropriate values
         """
         # CRITICAL: Prevent infinite recursion with much lower limit
-        if depth > 8:  # Reduced from 15 to 8
+        if depth > self.config.recursion.max_element_depth:
             return {"_recursion_limit": "Maximum depth reached"}
         
         # CRITICAL: Aggressive circular reference protection
         type_key = f"{element.local_name}_{str(element.type)}"
-        if type_key in self.processed_types and depth > 2:  # Reduced from 5 to 2
+        if type_key in self.processed_types and depth > self.config.recursion.circular_reference_depth:
             return {"_circular_ref": f"Circular reference detected for {element.local_name}"}
         
-        # CRITICAL: Prevent processing same type multiple times at any depth > 3
-        if depth > 3 and type_key in self.processed_types:
+        # CRITICAL: Prevent processing same type multiple times at any depth > configured limit
+        if depth > self.config.recursion.max_type_processing_depth and type_key in self.processed_types:
             return {"_type_reuse": f"Type {element.local_name} already processed"}
         
         self.processed_types.add(type_key)
@@ -388,7 +365,7 @@ class XMLGenerator:
                             if selected_element.max_occurs is None or selected_element.max_occurs > 1:
                                 count = self._get_element_count(child_name, selected_element, depth)
                                 # CRITICAL: Limit count based on depth to prevent memory explosion
-                                safe_count = min(count, max(1, 5 - depth))  # Exponentially reduce count
+                                safe_count = min(count, max(1, self.config.recursion.max_tree_depth - depth))  # Reduce count based on config
                                 result[child_name] = [self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
                             else:
                                 result[child_name] = self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1)

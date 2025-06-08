@@ -184,8 +184,10 @@ class TestElementTreeExtraction:
         root_element = list(xml_generator_order_view.schema.elements.values())[0]
         tree = extract_element_tree(root_element, "IATA_OrderViewRS", level=0)
         
-        # Should not go deeper than 3 levels
-        def check_max_level(node, max_level=3):
+        # Should not go deeper than configured tree depth
+        from config import get_config
+        config = get_config()
+        def check_max_level(node, max_level=config.ui.default_tree_depth):
             assert node['level'] <= max_level
             for child in node['children']:
                 check_max_level(child, max_level)
@@ -291,9 +293,9 @@ class TestAppHelperFunctions:
         finally:
             shutil.rmtree(test_temp_dir, ignore_errors=True)
     
-    def test_display_tree_node_structure(self):
-        """Test tree node display structure (unit test for data structure)."""
-        from app import display_tree_node
+    def test_convert_tree_to_streamlit_format(self):
+        """Test tree node conversion to streamlit format."""
+        from app import convert_tree_to_streamlit_format
         
         # Create a mock tree node
         mock_node = {
@@ -308,15 +310,12 @@ class TestAppHelperFunctions:
             'occurs': {'min': 1, 'max': 1}
         }
         
-        # This function writes to streamlit, so we can't easily test output
-        # But we can test that it doesn't crash with valid input
-        try:
-            # In a real test environment, this would need streamlit context
-            # For now, just test that the function exists and accepts the right parameters
-            assert callable(display_tree_node)
-        except Exception:
-            # Expected to fail outside of streamlit context
-            pass
+        # Test the conversion function that actually exists
+        result = convert_tree_to_streamlit_format(mock_node)
+        assert 'value' in result
+        assert 'label' in result
+        assert result['value'] == 'TestElement'
+        assert 'TestElement' in result['label']
 
 
 class TestGenerateXMLFromXSDFunction:

@@ -1,0 +1,94 @@
+{
+  "recursion": {
+    "max_tree_depth": 5,
+    "max_element_depth": 8,
+    "max_type_processing_depth": 3,
+    "circular_reference_depth": 2
+  },
+  "elements": {
+    "default_element_count": 2,
+    "max_unbounded_count": 10,
+    "min_element_count": 1,
+    "max_array_display": 10
+  },
+  "data_generation": {
+    "string_patterns": {
+      "code": "ABC123",
+      "id": "{element_name}123456",
+      "name": "Sample {element_name}",
+      "description": "Sample description for {element_name}",
+      "type": "SampleType",
+      "currency": "USD",
+      "country": "US",
+      "language": "en",
+      "email": "sample@example.com",
+      "phone": "+1234567890",
+      "url": "https://example.com",
+      "version": "1.0"
+    },
+    "numeric_patterns": {
+      "count": 5,
+      "number": 123,
+      "amount": 100,
+      "price": 100,
+      "quantity": 1,
+      "total": 500,
+      "tax": 10,
+      "fee": 25,
+      "rate": 15,
+      "percentage": 10,
+      "age": 25,
+      "year": 2024,
+      "month": 6,
+      "day": 15
+    },
+    "date_patterns": {
+      "date": "2024-06-08",
+      "datetime": "2024-06-08T12:00:00Z",
+      "time": "12:00:00",
+      "timestamp": "2024-06-08T12:00:00.000Z"
+    },
+    "boolean_default": true,
+    "default_string_length": 10
+  },
+  "schema_patterns": {
+    "choice_patterns": {
+      "iata_order_view": ["Error", "Response"],
+      "iata_error_response": ["Error", "Response"],
+      "generic_choice": []
+    },
+    "namespace_mappings": {
+      "iata": {
+        "common_types": "http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes",
+        "default_namespace": "http://www.iata.org/IATA/2015/EASD/00/",
+        "prefix": "cns"
+      },
+      "generic": {
+        "default_namespace": "",
+        "prefix": ""
+      }
+    },
+    "resource_directories": {
+      "iata": "21_3_5_distribution_schemas",
+      "default": "schemas"
+    },
+    "dependency_patterns": {
+      "iata": ["IATA_*.xsd", "*CommonTypes.xsd", "xmldsig-*.xsd"],
+      "default": ["*.xsd"]
+    }
+  },
+  "performance": {
+    "enable_caching": true,
+    "max_cache_size": 100,
+    "enable_metrics": false,
+    "timeout_seconds": 30,
+    "max_file_size_mb": 50
+  },
+  "ui": {
+    "default_page_title": "XML Chunker",
+    "max_file_upload_mb": 10,
+    "default_tree_depth": 4,
+    "show_debug_info": false,
+    "enable_download": true
+  }
+}
