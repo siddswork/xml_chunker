@@ -177,3 +177,95 @@ class TestOrderViewRSDataGeneration:
         # This tests the namespace handling in complex type processing
         assert xml_content is not None
         # The specific prefix usage depends on the generated content structure
+
+
+class TestOrderViewRSNewMethods:
+    """Test new methods added to XMLGenerator for user choice handling."""
+    
+    def test_generate_dummy_xml_with_choices_method_exists(self, xml_generator_order_view):
+        """Test that the new method exists and is callable."""
+        assert hasattr(xml_generator_order_view, 'generate_dummy_xml_with_choices')
+        assert callable(xml_generator_order_view.generate_dummy_xml_with_choices)
+    
+    def test_generate_dummy_xml_with_choices_error_selection(self, xml_generator_order_view):
+        """Test XML generation with Error choice selected."""
+        selected_choices = {
+            'choice_0': {
+                'path': 'IATA_OrderViewRS',
+                'selected_element': 'Error',
+                'choice_data': {}
+            }
+        }
+        
+        xml_content = xml_generator_order_view.generate_dummy_xml_with_choices(selected_choices)
+        
+        assert xml_content is not None
+        assert not xml_content.startswith('<error>')
+        assert 'Error' in xml_content
+        # Should prefer Error over Response
+        assert xml_content.count('Error') >= xml_content.count('Response')
+    
+    def test_generate_dummy_xml_with_unbounded_counts(self, xml_generator_order_view):
+        """Test XML generation with custom unbounded element counts."""
+        unbounded_counts = {
+            'Error': 4,
+            'IATA_OrderViewRS.Error': 4
+        }
+        
+        xml_content = xml_generator_order_view.generate_dummy_xml_with_choices(None, unbounded_counts)
+        
+        assert xml_content is not None
+        assert not xml_content.startswith('<error>')
+        
+        # Check if Error elements are present and potentially respecting count
+        if 'Error' in xml_content:
+            error_count = xml_content.count('<Error>')
+            # Should have at least some Error elements
+            assert error_count >= 1
+    
+    def test_generate_dummy_xml_with_choices_none_parameters(self, xml_generator_order_view):
+        """Test that method handles None parameters gracefully."""
+        xml_content = xml_generator_order_view.generate_dummy_xml_with_choices(None, None)
+        
+        assert xml_content is not None
+        assert not xml_content.startswith('<error>')
+        assert 'IATA_OrderViewRS' in xml_content
+    
+    def test_get_element_count_method_behavior(self, xml_generator_order_view):
+        """Test the _get_element_count helper method behavior."""
+        # Set up user preferences
+        xml_generator_order_view.user_unbounded_counts = {
+            'Error': 5,
+            'TestElement': 3
+        }
+        
+        # Mock element for testing
+        class MockElement:
+            local_name = 'Error'
+            max_occurs = None  # unbounded
+        
+        mock_element = MockElement()
+        
+        # Test with user-specified count
+        count = xml_generator_order_view._get_element_count('Error', mock_element)
+        assert count == 5
+        
+        # Test with element not in user preferences
+        count = xml_generator_order_view._get_element_count('UnknownElement', mock_element)
+        assert count >= 2  # Should use default random count
+        assert count <= 3
+    
+    def test_user_preferences_storage(self, xml_generator_order_view):
+        """Test that user preferences are properly stored in generator instance."""
+        selected_choices = {'choice_0': {'path': 'test', 'selected_element': 'Error'}}
+        unbounded_counts = {'Error': 3}
+        
+        xml_content = xml_generator_order_view.generate_dummy_xml_with_choices(
+            selected_choices, unbounded_counts
+        )
+        
+        # Check that preferences were stored
+        assert hasattr(xml_generator_order_view, 'user_choices')
+        assert hasattr(xml_generator_order_view, 'user_unbounded_counts')
+        assert xml_generator_order_view.user_choices == selected_choices
+        assert xml_generator_order_view.user_unbounded_counts == unbounded_counts

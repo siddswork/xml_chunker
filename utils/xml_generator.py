@@ -203,25 +203,42 @@ class XMLGenerator:
                 
         return is_optional, occurrence_info
     
-    def _get_element_count(self, element_name: str, element: xmlschema.validators.XsdElement) -> int:
-        """Get the count for repeating elements."""
+    def _get_element_count(self, element_name: str, element: xmlschema.validators.XsdElement, depth: int = 0) -> int:
+        """Get the count for repeating elements with depth-aware limits."""
         if element is None or not element_name:
             return 1
             
         # Check user preferences first
         if hasattr(self, 'user_unbounded_counts') and self.user_unbounded_counts:
+            # Check multiple possible path formats
             possible_paths = [
                 element_name,
                 f"root.{element_name}",
                 element_name.split(':')[-1] if ':' in element_name else element_name
             ]
             
+            # Add schema-specific paths (check all keys for patterns like "SchemaName.ElementName")
+            for key in self.user_unbounded_counts.keys():
+                if '.' in key and key.endswith(f".{element_name}"):
+                    possible_paths.append(key)
+            
             for path in possible_paths:
                 if path in self.user_unbounded_counts:
-                    return max(1, self.user_unbounded_counts[path])  # Ensure at least 1
+                    user_count = max(1, self.user_unbounded_counts[path])
+                    # Limit based on depth to prevent exponential growth
+                    if depth > 8:
+                        return min(user_count, 1)  # Force single element at deep levels
+                    elif depth > 5:
+                        return min(user_count, 2)  # Limit to 2 at moderate depth
+                    return user_count
         
-        # Default: deterministic count of 2
-        return 2
+        # Depth-aware default count to prevent exponential growth
+        if depth > 8:
+            return 1  # Only 1 element at very deep levels
+        elif depth > 5:
+            return 1  # Reduce to 1 at moderate depth
+        else:
+            return 2  # Default: 2 only at shallow levels
     
     def _get_namespace_prefix(self, namespace: str) -> Optional[str]:
         """Get the prefix for a given namespace."""
@@ -320,14 +337,18 @@ class XMLGenerator:
         Returns:
             Dictionary with element structure and appropriate values
         """
-        # Prevent infinite recursion
-        if depth > 15:
+        # CRITICAL: Prevent infinite recursion with much lower limit
+        if depth > 8:  # Reduced from 15 to 8
             return {"_recursion_limit": "Maximum depth reached"}
         
-        # Track processed types to prevent circular references
+        # CRITICAL: Aggressive circular reference protection
         type_key = f"{element.local_name}_{str(element.type)}"
-        if type_key in self.processed_types and depth > 5:
+        if type_key in self.processed_types and depth > 2:  # Reduced from 5 to 2
             return {"_circular_ref": f"Circular reference detected for {element.local_name}"}
+        
+        # CRITICAL: Prevent processing same type multiple times at any depth > 3
+        if depth > 3 and type_key in self.processed_types:
+            return {"_type_reuse": f"Type {element.local_name} already processed"}
         
         self.processed_types.add(type_key)
         
@@ -365,8 +386,10 @@ class XMLGenerator:
                             result[f"_comment_{child_name}"] = f"{occurrence_info} (selected choice)"
                             
                             if selected_element.max_occurs is None or selected_element.max_occurs > 1:
-                                count = self._get_element_count(child_name, selected_element)
-                                result[child_name] = [self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1) for _ in range(count)]
+                                count = self._get_element_count(child_name, selected_element, depth)
+                                # CRITICAL: Limit count based on depth to prevent memory explosion
+                                safe_count = min(count, max(1, 5 - depth))  # Exponentially reduce count
+                                result[child_name] = [self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
                             else:
                                 result[child_name] = self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1)
                         
@@ -380,8 +403,10 @@ class XMLGenerator:
                                     result[f"_comment_{child_name}"] = occurrence_info
                                     
                                     if child.max_occurs is None or child.max_occurs > 1:
-                                        count = self._get_element_count(child_name, child)
-                                        result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(count)]
+                                        count = self._get_element_count(child_name, child, depth)
+                                        # CRITICAL: Limit count based on depth to prevent memory explosion
+                                        safe_count = min(count, max(1, 5 - depth))  # Exponentially reduce count
+                                        result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
                                     else:
                                         result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
                         except AttributeError:
@@ -397,8 +422,10 @@ class XMLGenerator:
                                 result[f"_comment_{child_name}"] = occurrence_info
                                 
                                 if child.max_occurs is None or child.max_occurs > 1:
-                                    count = self._get_element_count(child_name, child)
-                                    result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(count)]
+                                    count = self._get_element_count(child_name, child, depth)
+                                    # CRITICAL: Limit count based on depth to prevent memory explosion
+                                    safe_count = min(count, max(1, 5 - depth))  # Exponentially reduce count
+                                    result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
                                 else:
                                     result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
                         except AttributeError:
@@ -426,6 +453,11 @@ class XMLGenerator:
         """Generate a dummy XML file based on the XSD schema."""
         if not self.schema:
             return self._create_error_xml("Schema not loaded or is None")
+        
+        # Add performance monitoring
+        import time
+        start_time = time.time()
+        print(f"Starting XML generation at {start_time}")
         
         try:
             # Validate schema has elements
@@ -495,6 +527,13 @@ class XMLGenerator:
                 return self._create_error_xml("Generated XML string is empty")
             
             xml_content = f'<?xml version="1.0" encoding="UTF-8"?>\n{xml_string}'
+            
+            # Performance monitoring
+            end_time = time.time()
+            generation_time = end_time - start_time
+            print(f"XML generation completed in {generation_time:.2f} seconds")
+            print(f"Generated XML size: {len(xml_content)} characters")
+            print(f"Processed types count: {len(self.processed_types)}")
             
             # Save to file if requested
             if output_path:
