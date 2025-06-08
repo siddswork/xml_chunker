@@ -210,11 +210,17 @@ class XMLGenerator:
             
         # Check user preferences first
         if hasattr(self, 'user_unbounded_counts') and self.user_unbounded_counts:
+            # Check multiple possible path formats
             possible_paths = [
                 element_name,
                 f"root.{element_name}",
                 element_name.split(':')[-1] if ':' in element_name else element_name
             ]
+            
+            # Add schema-specific paths (check all keys for patterns like "SchemaName.ElementName")
+            for key in self.user_unbounded_counts.keys():
+                if '.' in key and key.endswith(f".{element_name}"):
+                    possible_paths.append(key)
             
             for path in possible_paths:
                 if path in self.user_unbounded_counts:
