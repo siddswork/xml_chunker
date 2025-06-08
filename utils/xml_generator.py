@@ -13,6 +13,7 @@ from datetime import datetime
 import xmlschema
 from lxml import etree
 from config import get_config
+from .type_generators import TypeGeneratorFactory
 
 
 class XMLGenerator:
@@ -30,6 +31,7 @@ class XMLGenerator:
         self.schema = None
         self.processed_types = set()  # Track processed types to prevent infinite recursion
         self.config = config_instance or get_config()
+        self.type_factory = TypeGeneratorFactory(self.config)  # Initialize type generator factory
         self._load_schema()
     
     def _load_schema(self) -> None:
@@ -93,153 +95,51 @@ class XMLGenerator:
         except Exception as e:
             raise ValueError(f"Failed to load XSD schema: {e}")
     
-    def _generate_deterministic_string(self, element_name: str = "", context: str = "", max_length: int = None) -> str:
-        """Generate a deterministic string based on element name and context using config patterns."""
-        if not element_name:
-            base_value = "SampleText"
-        else:
-            # Use config-based data generation
-            base_value = self.config.get_data_pattern(element_name, 'string')
-        
-        # Apply length constraints if specified
-        if max_length is not None and len(base_value) > max_length:
-            if max_length > 0:
-                return base_value[:max_length]
-            else:
-                return ""
-        
-        return base_value
     
-    def _generate_deterministic_number(self, element_name: str = "") -> int:
-        """Generate a deterministic number based on element name using config patterns."""
-        if not element_name:
-            return 123
-        
-        # Use config-based data generation and ensure it's an integer
-        value = self.config.get_data_pattern(element_name, 'int')
-        return int(value)  # Ensure we return an integer, not float
     
-    def _generate_deterministic_decimal(self, element_name: str = "") -> float:
-        """Generate a deterministic decimal based on element name using config patterns."""
-        if not element_name:
-            return 99.99
-        
-        # Use config-based data generation (convert int to float)
-        return float(self.config.get_data_pattern(element_name, 'int'))
     
-    def _generate_deterministic_date(self, element_name: str = "") -> str:
-        """Generate a deterministic date in ISO format using config patterns."""
-        return self.config.get_data_pattern(element_name or 'date', 'date')
     
-    def _generate_deterministic_datetime(self, element_name: str = "") -> str:
-        """Generate a deterministic datetime in ISO format using config patterns."""
-        return self.config.get_data_pattern(element_name or 'datetime', 'datetime')
     
-    def _generate_deterministic_time(self, element_name: str = "") -> str:
-        """Generate a deterministic time using config patterns."""
-        return self.config.get_data_pattern(element_name or 'time', 'time')
     
-    def _generate_deterministic_boolean(self, element_name: str = "") -> str:
-        """Generate a deterministic boolean value using config patterns (XML Schema format)."""
-        return self.config.get_data_pattern(element_name or 'boolean', 'boolean')
     
     def _generate_value_for_type(self, type_name, element_name: str = "") -> Any:
-        """Generate a deterministic value based on the XSD type."""
-        # Extract length constraints if present
-        max_length = None
-        exact_length = None
+        """Generate validation-compliant value using modular type generators."""
+        # Extract constraints from the type
+        constraints = self._extract_type_constraints(type_name)
         
-        if hasattr(type_name, 'facets'):
+        # Check for enumeration constraints first
+        if hasattr(type_name, 'enumeration') and type_name.enumeration:
+            constraints['enum_values'] = [str(value) for value in type_name.enumeration]
+        
+        # Create appropriate type generator and generate value
+        generator = self.type_factory.create_generator(type_name, constraints)
+        return generator.generate(element_name, constraints)
+    
+    def _extract_type_constraints(self, type_name) -> Dict[str, Any]:
+        """Extract validation constraints from XSD type definition."""
+        constraints = {}
+        
+        # Extract facets (length, pattern, min/max values)
+        if hasattr(type_name, 'facets') and type_name.facets:
             for facet_name, facet in type_name.facets.items():
                 if facet_name == 'maxLength':
-                    max_length = facet.value
+                    constraints['max_length'] = facet.value
+                elif facet_name == 'minLength':
+                    constraints['min_length'] = facet.value
                 elif facet_name == 'length':
-                    exact_length = facet.value
+                    constraints['exact_length'] = facet.value
+                elif facet_name == 'pattern':
+                    constraints['pattern'] = facet.value
+                elif facet_name == 'minInclusive':
+                    constraints['min_value'] = facet.value
+                elif facet_name == 'maxInclusive':
+                    constraints['max_value'] = facet.value
+                elif facet_name == 'enumeration':
+                    if 'enum_values' not in constraints:
+                        constraints['enum_values'] = []
+                    constraints['enum_values'].append(str(facet.value))
         
-        # Handle xmlschema type objects first - check primitive types
-        if hasattr(type_name, 'primitive_type'):
-            primitive_type = type_name.primitive_type
-            if hasattr(primitive_type, 'name'):
-                primitive_name = str(primitive_type.name).lower()
-                
-                # Check exact primitive type names for precise matching
-                if 'boolean' in primitive_name:
-                    return self._generate_deterministic_boolean(element_name)
-                elif 'decimal' in primitive_name:
-                    return self._generate_deterministic_decimal(element_name)
-                elif 'integer' in primitive_name:
-                    return self._generate_deterministic_number(element_name)
-                elif 'datetime' in primitive_name:
-                    return self._generate_deterministic_datetime(element_name)
-                elif 'date' in primitive_name:
-                    # Check if it's specifically dateTime or just date
-                    type_str = str(type_name).lower()
-                    if 'datetime' in type_str:
-                        return self._generate_deterministic_datetime(element_name)
-                    else:
-                        return self._generate_deterministic_date(element_name)
-                elif 'time' in primitive_name:
-                    return self._generate_deterministic_time(element_name)
-                elif any(t in primitive_name for t in ['float', 'double']):
-                    return self._generate_deterministic_decimal(element_name)
-                elif any(t in primitive_name for t in ['string', 'token', 'normalizedstring']):
-                    # Apply length constraints for string types
-                    length_constraint = exact_length if exact_length is not None else max_length
-                    return self._generate_deterministic_string(element_name, max_length=length_constraint)
-        
-        if hasattr(type_name, 'base_type'):
-            # Check if base type is boolean (for restrictions like IndType)
-            base_str = str(type_name.base_type).lower()
-            if 'boolean' in base_str:
-                return self._generate_deterministic_boolean(element_name)
-        
-        # Check for boolean-related type names (IndType, FlagType, etc.)
-        if (hasattr(type_name, 'name') and type_name.name and 
-            ('ind' in str(type_name.name).lower() or 'flag' in str(type_name.name).lower())):
-            return self._generate_deterministic_boolean(element_name)
-        
-        # Convert to string for pattern matching (fallback)
-        type_str = str(type_name).lower()
-        
-        # Enhanced string-based type detection with more specific patterns
-        if 'xsdatomicbuiltin' in type_str:
-            # Extract the actual type from XsdAtomicBuiltin(name='xs:type')
-            if "'xs:decimal'" in type_str or "'xs:float'" in type_str or "'xs:double'" in type_str:
-                return self._generate_deterministic_decimal(element_name)
-            elif "'xs:integer'" in type_str or "'xs:int'" in type_str or "'xs:long'" in type_str:
-                return self._generate_deterministic_number(element_name)
-            elif "'xs:datetime'" in type_str:
-                return self._generate_deterministic_datetime(element_name)
-            elif "'xs:date'" in type_str:
-                return self._generate_deterministic_date(element_name)
-            elif "'xs:time'" in type_str:
-                return self._generate_deterministic_time(element_name)
-            elif "'xs:boolean'" in type_str:
-                return self._generate_deterministic_boolean(element_name)
-            elif "'xs:string'" in type_str or "'xs:token'" in type_str:
-                return self._generate_deterministic_string(element_name)
-        
-        # Fallback string-based detection
-        length_constraint = exact_length if exact_length is not None else max_length
-        
-        if 'string' in type_str or 'token' in type_str or 'normalizedstring' in type_str:
-            return self._generate_deterministic_string(element_name, max_length=length_constraint)
-        elif any(t in type_str for t in ['int', 'long', 'short', 'positiveinteger', 'nonpositiveinteger']):
-            return self._generate_deterministic_number(element_name)
-        elif any(t in type_str for t in ['decimal', 'float', 'double']):
-            return self._generate_deterministic_decimal(element_name)
-        elif 'boolean' in type_str:
-            return self._generate_deterministic_boolean(element_name)
-        elif 'datetime' in type_str:
-            return self._generate_deterministic_datetime(element_name)
-        elif 'date' in type_str:
-            return self._generate_deterministic_date(element_name)
-        elif 'time' in type_str:
-            return self._generate_deterministic_time(element_name)
-        elif 'anyuri' in type_str:
-            return "https://example.com/sample"
-        else:
-            return self._generate_deterministic_string(element_name, max_length=length_constraint)
+        return constraints
     
     def _get_element_occurrence_info(self, element: xmlschema.validators.XsdElement) -> Tuple[bool, str]:
         """Get information about element occurrence constraints."""
