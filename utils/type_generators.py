@@ -396,7 +396,11 @@ class TypeGeneratorFactory:
                 return BooleanTypeGenerator(self.config)
         
         # String-based fallback detection
-        type_str = str(xsd_type_name).lower()
+        try:
+            type_str = str(xsd_type_name).lower()
+        except Exception:
+            # If string conversion fails, return string generator as fallback
+            return StringTypeGenerator(self.config)
         
         # Enhanced string-based type detection with more specific patterns
         if 'xsdatomicbuiltin' in type_str:

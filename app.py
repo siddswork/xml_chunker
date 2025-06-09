@@ -1,3 +1,30 @@
+"""
+XML Chunker - Main Streamlit Application
+
+This is the main entry point for the XML Chunker application, a modular Streamlit 
+interface for parsing XSD schemas and generating compliant dummy XML files.
+
+The application specializes in IATA NDC (New Distribution Capability) XSD schemas, 
+providing advanced analysis, choice element handling, and validation-aware XML generation.
+
+Key Features:
+- Interactive XSD file upload with dependency resolution
+- Real-time schema analysis with tree visualization
+- Choice element selection and unbounded element configuration
+- Type-aware XML generation with validation compliance
+- Comprehensive error categorization and reporting
+
+Architecture:
+This module serves as the presentation layer, orchestrating the following services:
+- FileManager: File operations and temporary directory management
+- XMLValidator: XML validation against XSD schemas with detailed error reporting
+- SchemaAnalyzer: XSD schema analysis and structure extraction
+- XMLGenerator: Universal XML generation engine
+
+Author: XML Chunker Development Team
+License: MIT
+"""
+
 import streamlit as st
 import io
 import os
@@ -6,9 +33,15 @@ from utils.xml_generator import XMLGenerator
 from utils.xsd_parser import XSDParser
 from streamlit_tree_select import tree_select
 from config import get_config
+from services.file_manager import FileManager
+from services.xml_validator import XMLValidator
+from services.schema_analyzer import SchemaAnalyzer
 
-# Initialize configuration
+# Initialize configuration and services
 config = get_config()
+file_manager = FileManager(config)
+xml_validator = XMLValidator(config)
+schema_analyzer = SchemaAnalyzer(config)
 
 st.set_page_config(
     page_title=config.ui.default_page_title,
@@ -123,42 +156,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name):
-    """
-    Set up temporary directory with XSD dependencies.
-    
-    Args:
-        xsd_file_path: Path to the XSD file
-        xsd_file_name: Original name of the XSD file
-    """
-    try:
-        resource_dir = config.get_resource_dir('iata')
-        
-        if not os.path.exists(resource_dir):
-            print(f"Warning: Resource directory not found: {resource_dir}")
-            return
-            
-        temp_dir = os.path.dirname(xsd_file_path)
-        if not os.path.exists(temp_dir):
-            print(f"Warning: Temp directory not found: {temp_dir}")
-            return
-        
-        for filename in os.listdir(resource_dir):
-            if filename.endswith('.xsd') and filename != xsd_file_name:
-                try:
-                    src_path = os.path.join(resource_dir, filename)
-                    dst_path = os.path.join(temp_dir, filename)
-                    
-                    if os.path.exists(src_path) and os.path.isfile(src_path):
-                        with open(src_path, 'rb') as src_file:
-                            with open(dst_path, 'wb') as dst_file:
-                                dst_file.write(src_file.read())
-                except Exception as e:
-                    print(f"Warning: Could not copy {filename}: {e}")
-                    
-    except Exception as e:
-        print(f"Warning: Error setting up dependencies: {e}")
-
 def analyze_xsd_schema(xsd_file_path):
     """
     Analyze XSD schema to extract choice elements and structure.
@@ -169,289 +166,7 @@ def analyze_xsd_schema(xsd_file_path):
     Returns:
         Dictionary containing schema analysis
     """
-    try:
-        parser = XSDParser(xsd_file_path)
-        schema_info = parser.get_schema_info()
-        root_elements = parser.get_root_elements()
-        
-        # Get detailed element structure including unbounded elements
-        choices = []
-        unbounded_elements = []
-        element_tree = {}
-        
-        if parser.schema:
-            for element_name, element in parser.schema.elements.items():
-                if element.type and element.type.is_complex():
-                    tree_data = extract_element_tree(element, element_name)
-                    element_tree[element_name] = tree_data
-                    
-                    element_choices = extract_choice_elements(element)
-                    if element_choices:
-                        choices.extend(element_choices)
-                    
-                    # Find unbounded elements
-                    unbounded = find_unbounded_elements(element)
-                    unbounded_elements.extend(unbounded)
-        
-        return {
-            'schema_info': schema_info,
-            'root_elements': root_elements,
-            'choices': choices,
-            'unbounded_elements': unbounded_elements,
-            'element_tree': element_tree,
-            'success': True
-        }
-    except Exception as e:
-        return {
-            'error': str(e),
-            'success': False
-        }
-
-def extract_element_tree(element, element_name, level=0, processed_types=None):
-    """
-    Extract element tree structure for display with improved depth and None handling.
-    
-    Args:
-        element: XSD element
-        element_name: Name of the element
-        level: Nesting level for indentation
-        processed_types: Set to track processed types and prevent circular references
-        
-    Returns:
-        Dictionary containing tree structure
-    """
-    # Initialize processed types set if not provided
-    if processed_types is None:
-        processed_types = set()
-    
-    # CRITICAL: Prevent circular references
-    if element and hasattr(element, 'type') and element.type:
-        type_key = f"{element_name}_{str(element.type)}"
-        if type_key in processed_types:
-            return {
-                'name': element_name,
-                'level': level,
-                'children': [],
-                'is_choice': False,
-                'choice_options': [],
-                'is_unbounded': False,
-                'occurs': {'min': 1, 'max': '1'},
-                '_circular_ref': f'Circular reference: {element_name}'
-            }
-        processed_types.add(type_key)
-    
-    # CRITICAL: Prevent stack overflow with strict depth limit
-    if level > config.recursion.max_tree_depth:
-        return {
-            'name': element_name,
-            'level': level,
-            'children': [],
-            'is_choice': False,
-            'choice_options': [],
-            'is_unbounded': False,
-            'occurs': {'min': 1, 'max': '1'},
-            '_depth_limit': 'Maximum depth reached'
-        }
-    
-    # Safely get occurrence values with proper None handling
-    min_occurs = getattr(element, 'min_occurs', 1) or 1
-    max_occurs = getattr(element, 'max_occurs', 1)
-    
-    # Format max_occurs to avoid showing None
-    if max_occurs is None:
-        max_display = "unbounded"
-        is_unbounded = True
-    elif max_occurs > 1:
-        max_display = str(max_occurs)
-        is_unbounded = True
-    else:
-        max_display = "1"
-        is_unbounded = False
-    
-    tree_data = {
-        'name': element_name,
-        'level': level,
-        'children': [],
-        'is_choice': False,
-        'choice_options': [],
-        'is_unbounded': is_unbounded,
-        'occurs': {'min': min_occurs, 'max': max_display}
-    }
-    
-    try:
-        # Only process complex types that have content
-        if (hasattr(element, 'type') and element.type and 
-            element.type.is_complex() and 
-            hasattr(element.type, 'content') and element.type.content and 
-            level < config.ui.default_tree_depth):
-            
-            choice_found = False
-            
-            try:
-                # Check for choice constructs first
-                for item in element.type.content.iter_components():
-                    if hasattr(item, 'model') and item.model == 'choice':
-                        tree_data['is_choice'] = True
-                        choice_found = True
-                        # Safely iterate choice elements
-                        try:
-                            for choice_item in item.iter_elements():
-                                choice_min = getattr(choice_item, 'min_occurs', 1) or 1
-                                choice_max = getattr(choice_item, 'max_occurs', 1)
-                                choice_max_display = "unbounded" if choice_max is None else str(choice_max)
-                                
-                                tree_data['choice_options'].append({
-                                    'name': choice_item.local_name or 'UnknownChoice',
-                                    'min_occurs': choice_min,
-                                    'max_occurs': choice_max_display
-                                })
-                        except AttributeError:
-                            # Skip items that don't support iter_elements
-                            pass
-            except AttributeError:
-                # iter_components not available
-                pass
-            
-            try:
-                # Process regular elements safely
-                for item in element.type.content.iter_elements():
-                    if (hasattr(item, 'local_name') and item.local_name and 
-                        hasattr(item, 'type') and item.type):
-                        child_tree = extract_element_tree(item, item.local_name, level + 1, processed_types)
-                        if child_tree and child_tree.get('name'):  # Only add valid trees
-                            tree_data['children'].append(child_tree)
-            except AttributeError:
-                # iter_elements not available, try alternative approach
-                try:
-                    # For some schema types, use direct iteration
-                    if hasattr(element.type.content, '_group'):
-                        for group_item in element.type.content._group:
-                            if hasattr(group_item, 'local_name') and group_item.local_name:
-                                child_tree = extract_element_tree(group_item, group_item.local_name, level + 1, processed_types)
-                                if child_tree and child_tree.get('name'):
-                                    tree_data['children'].append(child_tree)
-                except:
-                    pass
-                        
-            # Special handling for schema-specific patterns - detect choice patterns
-            if not choice_found and element_name:
-                child_names = [child['name'] for child in tree_data['children']]
-                choice_patterns = config.get_choice_patterns('iata')
-                
-                # Check if all choice patterns are present in children
-                if choice_patterns and all(pattern in child_names for pattern in choice_patterns):
-                    tree_data['is_choice'] = True
-                    tree_data['choice_options'] = []
-                    for pattern in choice_patterns:
-                        tree_data['choice_options'].append({
-                            'name': pattern, 
-                            'min_occurs': 1, 
-                            'max_occurs': 'unbounded' if pattern == 'Error' else '1'
-                        })
-        
-        # Handle simple types - just show type info
-        elif hasattr(element, 'type') and element.type and element.type.is_simple():
-            tree_data['_type_info'] = f"Simple type: {element.type.local_name or str(element.type)}"
-                    
-    except Exception as e:
-        # More specific error handling
-        error_msg = str(e)
-        if "iter_elements" in error_msg:
-            tree_data['_error'] = "Simple type element (no children)"
-        elif "iter_components" in error_msg:
-            tree_data['_error'] = "Complex type without accessible components"
-        else:
-            tree_data['_error'] = f"Error extracting tree: {error_msg}"
-    
-    return tree_data
-
-def extract_choice_elements(element, depth=0):
-    """
-    Extract choice elements from XSD element with enhanced information.
-    
-    Args:
-        element: XSD element
-        depth: Current recursion depth
-        
-    Returns:
-        List of choice information
-    """
-    # Prevent infinite recursion
-    if depth > 3:
-        return []
-        
-    choices = []
-    try:
-        if hasattr(element.type, 'content') and element.type.content:
-            for item in element.type.content.iter_components():
-                if hasattr(item, 'model') and item.model == 'choice':
-                    choice_info = {
-                        'type': 'choice',
-                        'min_occurs': getattr(item, 'min_occurs', 1),
-                        'max_occurs': getattr(item, 'max_occurs', 1),
-                        'elements': [],
-                        'path': getattr(element, 'local_name', 'root')
-                    }
-                    
-                    for choice_item in item.iter_elements():
-                        choice_info['elements'].append({
-                            'name': choice_item.local_name,
-                            'type': str(choice_item.type) if choice_item.type else 'unknown',
-                            'min_occurs': choice_item.min_occurs,
-                            'max_occurs': choice_item.max_occurs
-                        })
-                    
-                    if choice_info['elements']:
-                        choices.append(choice_info)
-                        
-                # Also check for direct elements that might be choice-like
-                elif hasattr(item, 'local_name'):
-                    if hasattr(item, 'type') and item.type and item.type.is_complex():
-                        sub_choices = extract_choice_elements(item, depth + 1)
-                        choices.extend(sub_choices)
-    except Exception:
-        pass
-    
-    return choices
-
-def find_unbounded_elements(element, path=""):
-    """
-    Find elements with maxOccurs="unbounded".
-    
-    Args:
-        element: XSD element
-        path: Current path in the schema
-        
-    Returns:
-        List of unbounded elements
-    """
-    unbounded = []
-    current_path = f"{path}.{element.local_name}" if path else element.local_name
-    
-    try:
-        # Check if current element is unbounded
-        if hasattr(element, 'max_occurs') and (element.max_occurs is None or element.max_occurs > 1):
-            max_val = "unbounded" if element.max_occurs is None else element.max_occurs
-            unbounded.append({
-                'name': element.local_name,
-                'path': current_path,
-                'max_occurs': max_val
-            })
-        
-        # Check children
-        if hasattr(element.type, 'content') and element.type.content:
-            for item in element.type.content.iter_elements():
-                if hasattr(item, 'max_occurs') and (item.max_occurs is None or item.max_occurs > 1):
-                    max_val = "unbounded" if item.max_occurs is None else item.max_occurs
-                    unbounded.append({
-                        'name': item.local_name,
-                        'path': f"{current_path}.{item.local_name}",
-                        'max_occurs': max_val
-                    })
-    except Exception:
-        pass
-    
-    return unbounded
+    return schema_analyzer.analyze_xsd_schema(xsd_file_path)
 
 def convert_tree_to_streamlit_format(node, parent_path=""):
     """
@@ -548,36 +263,7 @@ def format_validation_error(error):
     Returns:
         Dictionary with formatted error information
     """
-    try:
-        # Extract path information
-        path = getattr(error, 'path', 'Unknown path')
-        
-        # Clean up the error message
-        message = str(error.message)
-        
-        # Extract element name from path if possible
-        element_name = 'Unknown'
-        if path and isinstance(path, str):
-            if '/' in path:
-                element_name = path.split('/')[-1]
-                # Remove namespace prefixes and array indices
-                if ':' in element_name:
-                    element_name = element_name.split(':')[-1]
-                element_name = element_name.split('[')[0]  # Remove array indices like [1]
-        
-        return {
-            'message': message,
-            'path': path,
-            'element_name': element_name,
-            'line': getattr(error, 'lineno', None)
-        }
-    except Exception:
-        return {
-            'message': str(error),
-            'path': 'Unknown',
-            'element_name': 'Unknown',
-            'line': None
-        }
+    return xml_validator.format_validation_error(error)
 
 def validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name=None, uploaded_file_content=None):
     """
@@ -592,87 +278,7 @@ def validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name=N
     Returns:
         Dictionary containing validation results
     """
-    try:
-        # Create a temporary XML file for validation
-        temp_xml_file = tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False, encoding='utf-8')
-        temp_xml_file.write(xml_content)
-        temp_xml_file.close()
-        temp_xml_path = temp_xml_file.name
-        
-        # Create temporary XSD file if the original path doesn't exist
-        temp_xsd_path = xsd_file_path
-        temp_xsd_cleanup = False
-        
-        if not os.path.exists(xsd_file_path) and uploaded_file_content and uploaded_file_name:
-            # Recreate the temp XSD file and dependencies
-            temp_dir = tempfile.mkdtemp()
-            temp_xsd_path = os.path.join(temp_dir, uploaded_file_name)
-            
-            # Write the XSD content
-            with open(temp_xsd_path, 'w', encoding='utf-8') as f:
-                f.write(uploaded_file_content)
-            
-            # Set up dependencies
-            setup_temp_directory_with_dependencies(temp_xsd_path, uploaded_file_name)
-            temp_xsd_cleanup = True
-        
-        try:
-            # Load the schema and validate
-            parser = XSDParser(temp_xsd_path)
-            
-            # Get detailed validation results using xmlschema
-            import xmlschema
-            errors = list(parser.schema.iter_errors(temp_xml_path))
-            
-            # Categorize validation errors for better reporting
-            enumeration_errors = [e for e in errors if 'XsdEnumerationFacets' in str(e.message)]
-            boolean_errors = [e for e in errors if "with XsdAtomicBuiltin(name='xs:boolean')" in str(e.message)]
-            pattern_errors = [e for e in errors if 'pattern' in str(e.message).lower()]
-            structural_errors = [e for e in errors if e not in enumeration_errors + boolean_errors + pattern_errors]
-            
-            # Basic validation result
-            is_valid = parser.validate_xml(temp_xml_path)
-            
-            return {
-                'is_valid': is_valid,
-                'total_errors': len(errors),
-                'error_breakdown': {
-                    'enumeration_errors': len(enumeration_errors),
-                    'boolean_errors': len(boolean_errors),
-                    'pattern_errors': len(pattern_errors),
-                    'structural_errors': len(structural_errors)
-                },
-                'categorized_errors': {
-                    'enumeration_errors': enumeration_errors,
-                    'boolean_errors': boolean_errors,
-                    'pattern_errors': pattern_errors,
-                    'structural_errors': structural_errors
-                },
-                'detailed_errors': errors[:10],  # First 10 errors for display
-                'success': True
-            }
-            
-        finally:
-            # Cleanup temporary XML file
-            try:
-                os.unlink(temp_xml_path)
-            except:
-                pass
-            
-            # Cleanup temporary XSD directory if we created it
-            if temp_xsd_cleanup and 'temp_dir' in locals():
-                try:
-                    import shutil
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                except:
-                    pass
-                
-    except Exception as e:
-        return {
-            'is_valid': False,
-            'error': str(e),
-            'success': False
-        }
+    return xml_validator.validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name, uploaded_file_content)
 
 def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, unbounded_counts=None):
     """
@@ -688,7 +294,7 @@ def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, u
         Generated XML content
     """
     try:
-        setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name)
+        file_manager.setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name)
         generator = XMLGenerator(xsd_file_path)
         
         # Pass user selections to generator if available
@@ -721,7 +327,7 @@ def main():
             temp_file.write(uploaded_file.getvalue())
         
         # Set up dependencies for schema analysis
-        setup_temp_directory_with_dependencies(temp_file_path, file_name)
+        file_manager.setup_temp_directory_with_dependencies(temp_file_path, file_name)
         
         col1, col2 = st.columns(2)
         

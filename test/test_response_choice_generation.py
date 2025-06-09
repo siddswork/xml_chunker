@@ -18,7 +18,7 @@ class TestResponseChoiceGeneration:
     @pytest.fixture(scope="class")
     def setup_order_view_rs_environment(self):
         """Set up environment specifically for OrderViewRS testing."""
-        from app import setup_temp_directory_with_dependencies
+        from services.file_manager import FileManager
         from utils.xml_generator import XMLGenerator
         
         # Create temp directory and copy all XSD files
@@ -29,7 +29,10 @@ class TestResponseChoiceGeneration:
             shutil.copy2(xsd_file, temp_dir)
         
         xsd_path = os.path.join(temp_dir, "IATA_OrderViewRS.xsd")
-        setup_temp_directory_with_dependencies(xsd_path, "IATA_OrderViewRS.xsd")
+        
+        # Use FileManager service instead of app function
+        file_manager = FileManager()
+        file_manager.setup_temp_directory_with_dependencies(xsd_path, "IATA_OrderViewRS.xsd")
         
         generator = XMLGenerator(xsd_path)
         
@@ -220,7 +223,8 @@ class TestChoiceVerificationWithAnalysis:
     
     def test_analyze_schema_then_select_response(self):
         """Test full workflow: analyze schema → select Response → verify generation."""
-        from app import analyze_xsd_schema, generate_xml_from_xsd
+        from services.schema_analyzer import SchemaAnalyzer
+        from utils.xml_generator import XMLGenerator
         
         # Set up environment
         resource_dir = Path(__file__).parent.parent / "resource" / "21_3_5_distribution_schemas"
@@ -233,7 +237,8 @@ class TestChoiceVerificationWithAnalysis:
             xsd_path = os.path.join(temp_dir, "IATA_OrderViewRS.xsd")
             
             # Step 1: Analyze schema to understand available choices
-            analysis = analyze_xsd_schema(xsd_path)
+            analyzer = SchemaAnalyzer()
+            analysis = analyzer.analyze_xsd_schema(xsd_path)
             
             assert analysis['success'] is True
             assert len(analysis['choices']) > 0
@@ -273,9 +278,8 @@ class TestChoiceVerificationWithAnalysis:
             print(f"Setting unbounded counts: {unbounded_counts}")
             
             # Step 4: Generate XML
-            xml_content = generate_xml_from_xsd(
-                xsd_path,
-                "IATA_OrderViewRS.xsd",
+            generator = XMLGenerator(xsd_path)
+            xml_content = generator.generate_dummy_xml_with_choices(
                 selected_choices,
                 unbounded_counts
             )
@@ -297,7 +301,7 @@ class TestChoiceVerificationWithAnalysis:
     
     def test_verify_unbounded_counts_precision(self):
         """Test precise verification of unbounded element counts."""
-        from app import analyze_xsd_schema
+        from services.schema_analyzer import SchemaAnalyzer
         from utils.xml_generator import XMLGenerator
         
         # Set up environment
@@ -311,7 +315,8 @@ class TestChoiceVerificationWithAnalysis:
             xsd_path = os.path.join(temp_dir, "IATA_OrderViewRS.xsd")
             
             # Analyze to get unbounded elements
-            analysis = analyze_xsd_schema(xsd_path)
+            analyzer = SchemaAnalyzer()
+            analysis = analyzer.analyze_xsd_schema(xsd_path)
             unbounded_elements = analysis['unbounded_elements']
             
             print(f"Found unbounded elements: {[e['name'] for e in unbounded_elements]}")
