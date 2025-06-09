@@ -123,7 +123,7 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
     
     def __init__(self, config_instance=None, date_type: str = 'datetime'):
         super().__init__(config_instance)
-        self.date_type = date_type  # 'datetime', 'date', 'time'
+        self.date_type = date_type  # 'datetime', 'date', 'time', 'duration'
     
     def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
         """Generate valid ISO format date/time - never empty string."""
@@ -139,6 +139,8 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
             return now.strftime('%Y-%m-%d')
         elif self.date_type == 'time':
             return now.strftime('%H:%M:%S')
+        elif self.date_type == 'duration':
+            return 'PT1H30M'  # ISO 8601 duration format (1 hour 30 minutes)
         else:  # datetime
             return now.strftime('%Y-%m-%dT%H:%M:%SZ')
     
@@ -150,6 +152,8 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
             return '2024-06-08'
         elif self.date_type == 'time':
             return '12:00:00'
+        elif self.date_type == 'duration':
+            return 'PT1H30M'
         else:
             return '2024-06-08T12:00:00Z'
 
@@ -223,8 +227,20 @@ class StringTypeGenerator(BaseTypeGenerator):
                 # Ensure pattern is a string
                 pattern_str = str(pattern) if pattern is not None else ""
                 if pattern_str and not re.match(pattern_str, value):
-                    # For common patterns, generate compliant values
-                    if pattern_str == r'[A-Z]{3}':  # Country/currency codes
+                    # For common patterns, generate compliant values based on our error analysis
+                    if pattern_str == '[0-9A-Z]{1,3}':  # Service codes (most common)
+                        value = '1A2'
+                    elif pattern_str == '[0-9]{1,4}':  # Flight numbers
+                        value = '1234'
+                    elif pattern_str == '[0-9A-Z]{3}':  # Aircraft codes
+                        value = '320'
+                    elif pattern_str == '(IATAC|BLTRL)[A-Za-z0-9]{2}':  # Payment rule codes
+                        value = 'IATAC1'
+                    elif pattern_str == '([0-9]{7}[A-Za-z0-9]{8})':  # Clearance IDs
+                        value = '1234567AB123456'
+                    elif pattern_str == '[0-9]{1,8}':  # IIN numbers
+                        value = '12345678'
+                    elif pattern_str == r'[A-Z]{3}':  # Country/currency codes
                         value = 'USD'
                     elif pattern_str == r'[A-Z]{2}':
                         value = 'US'
@@ -360,6 +376,8 @@ class TypeGeneratorFactory:
                     return DateTimeTypeGenerator(self.config, 'date')
                 elif 'time' in primitive_name:
                     return DateTimeTypeGenerator(self.config, 'time')
+                elif 'duration' in primitive_name:
+                    return DateTimeTypeGenerator(self.config, 'duration')
                 elif any(t in primitive_name for t in ['float', 'double']):
                     return NumericTypeGenerator(self.config, is_decimal=True)
                 elif any(t in primitive_name for t in ['string', 'token', 'normalizedstring']):

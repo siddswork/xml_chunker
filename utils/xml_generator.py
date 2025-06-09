@@ -379,6 +379,18 @@ class XMLGenerator:
                         if attr.type is not None:
                             result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name)
                 
+                # Handle complex types with simple content (like MeasureType)
+                # These have attributes AND a simple base type as content
+                if (hasattr(element.type, 'content') and element.type.content and 
+                    hasattr(element.type.content, 'is_simple') and element.type.content.is_simple()):
+                    # This is a complex type with simple content - generate the base value
+                    base_value = self._generate_value_for_type(element.type.content, element.local_name)
+                    if result:  # Has attributes
+                        result['_text'] = base_value
+                        return result
+                    else:  # No attributes, just return the value
+                        return base_value
+                
                 # Process content
                 if hasattr(element.type, 'content') and element.type.content is not None:
                     # Handle choice constructs
@@ -569,6 +581,10 @@ class XMLGenerator:
                     if v is not None:
                         parent_element.set(attr_name, str(v))
             
+            # Handle text content for complex types with simple content
+            if '_text' in data:
+                parent_element.text = str(data['_text'])
+            
             # Process elements
             for k, v in data.items():
                 if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
@@ -617,6 +633,9 @@ class XMLGenerator:
             elif namespace_prefix:
                 attrs_str = namespace_prefix
             
+            # Handle text content for complex types with simple content
+            text_content = data.get('_text', '')
+            
             # Build child elements
             children = []
             for k, v in data.items():
@@ -628,10 +647,11 @@ class XMLGenerator:
                     else:
                         children.append(self._dict_to_xml(k, v))
             
-            if not children:
+            if not children and not text_content:
                 return f'<{element_name}{" " + attrs_str if attrs_str else ""}></{element_name}>'
             
             children_str = ''.join(children)
-            return f'<{element_name}{" " + attrs_str if attrs_str else ""}>{children_str}</{element_name}>'
+            content = str(text_content) + children_str if text_content else children_str
+            return f'<{element_name}{" " + attrs_str if attrs_str else ""}>{content}</{element_name}>'
         else:
             return f'<{element_name}>{data}</{element_name}>'
