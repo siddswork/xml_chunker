@@ -243,14 +243,17 @@ class StringTypeGenerator(BaseTypeGenerator):
 
 
 class EnumerationTypeGenerator(BaseTypeGenerator):
-    """Generator for enumerated values ensuring valid choices."""
+    """Generator for enumerated values with smart selection and value tracking."""
+    
+    # Class-level tracking of used enum values for diversity
+    _used_values_tracker = {}
     
     def __init__(self, config_instance=None, enum_values: Optional[List[str]] = None):
         super().__init__(config_instance)
         self.enum_values = enum_values or []
     
     def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
-        """Generate value from enumeration list."""
+        """Generate value from enumeration list with smart selection and tracking."""
         # Extract enum values from constraints if provided
         if constraints and 'enum_values' in constraints:
             enum_list = constraints['enum_values']
@@ -260,14 +263,70 @@ class EnumerationTypeGenerator(BaseTypeGenerator):
         if not enum_list:
             return self.get_fallback_value()
         
-        # Use first valid enumeration value
+        # Filter out 'None' values which are just XSD placeholders
+        valid_enums = [val for val in enum_list if val != 'None']
+        if not valid_enums:
+            valid_enums = enum_list  # Use all if no non-None values
+        
+        # Smart selection with tracking for variety
+        selected_value = self._select_enum_value(element_name, valid_enums)
+        
+        # Track usage for future variety
+        self._track_enum_usage(element_name, selected_value, valid_enums)
+        
+        return selected_value
+    
+    def _select_enum_value(self, element_name: str, enum_list: List[str]) -> str:
+        """Select an enumeration value with smart rotation for variety."""
+        if len(enum_list) == 1:
+            return enum_list[0]
+        
+        # Create a key for tracking this enum type
+        tracking_key = f"{element_name}_{len(enum_list)}"
+        
+        # If we've used this enum type before, try to use a different value
+        if tracking_key in self._used_values_tracker:
+            used_values = self._used_values_tracker[tracking_key]
+            
+            # Find unused values first
+            unused_values = [val for val in enum_list if val not in used_values]
+            if unused_values:
+                return unused_values[0]  # Use first unused value
+            
+            # If all values have been used, cycle through them
+            # Use least recently used value
+            usage_count = {val: used_values.get(val, 0) for val in enum_list}
+            return min(usage_count.keys(), key=lambda x: usage_count[x])
+        
+        # First time encountering this enum type - use first value
         return enum_list[0]
+    
+    def _track_enum_usage(self, element_name: str, selected_value: str, enum_list: List[str]) -> None:
+        """Track enum value usage for future selections."""
+        tracking_key = f"{element_name}_{len(enum_list)}"
+        
+        if tracking_key not in self._used_values_tracker:
+            self._used_values_tracker[tracking_key] = {}
+        
+        # Increment usage count
+        current_count = self._used_values_tracker[tracking_key].get(selected_value, 0)
+        self._used_values_tracker[tracking_key][selected_value] = current_count + 1
     
     def get_type_name(self) -> str:
         return 'enum'
     
     def get_fallback_value(self) -> str:
         return "EnumValue"
+    
+    @classmethod
+    def get_usage_stats(cls) -> Dict[str, Dict[str, int]]:
+        """Get current enum value usage statistics."""
+        return cls._used_values_tracker.copy()
+    
+    @classmethod
+    def reset_usage_tracker(cls) -> None:
+        """Reset the enum value usage tracker."""
+        cls._used_values_tracker.clear()
 
 
 class TypeGeneratorFactory:

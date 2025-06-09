@@ -144,7 +144,13 @@ class XMLGenerator:
                 elif local_name == 'enumeration':
                     if 'enum_values' not in constraints:
                         constraints['enum_values'] = []
-                    constraints['enum_values'].append(str(facet.value))
+                    
+                    # Handle XsdEnumerationFacets objects (multiple enum values)
+                    if hasattr(facet, 'enumeration') and facet.enumeration:
+                        constraints['enum_values'].extend([str(val) for val in facet.enumeration])
+                    # Handle single enumeration facets
+                    elif hasattr(facet, 'value') and facet.value is not None:
+                        constraints['enum_values'].append(str(facet.value))
         
         return constraints
     
