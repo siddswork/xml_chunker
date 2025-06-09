@@ -152,6 +152,11 @@ class XMLGenerator:
                     elif hasattr(facet, 'value') and facet.value is not None:
                         constraints['enum_values'].append(str(facet.value))
         
+        # If no constraints found, check base_type for inherited constraints (like Type -> ContentType)
+        if not constraints and hasattr(type_name, 'base_type') and type_name.base_type:
+            base_constraints = self._extract_type_constraints(type_name.base_type)
+            constraints.update(base_constraints)
+        
         return constraints
     
     def _get_element_occurrence_info(self, element: xmlschema.validators.XsdElement) -> Tuple[bool, str]:
