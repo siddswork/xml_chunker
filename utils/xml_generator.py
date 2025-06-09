@@ -292,7 +292,11 @@ class XMLGenerator:
         # Check user preferences
         if hasattr(self, 'user_choices') and self.user_choices:
             for choice_key, choice_data in self.user_choices.items():
-                # Handle both formats: {"Response": True} and {"key": {"path": ..., "selected_element": ...}}
+                # Handle multiple formats:
+                # 1. Simple format: {"Response": True}
+                # 2. Complex format: {"key": {"path": ..., "selected_element": ...}}
+                # 3. Streamlit format: {"choice_0": {"path": ..., "selected_element": ...}}
+                
                 if isinstance(choice_data, bool):
                     # Simple format: look for element with matching name
                     if choice_data:  # If True, select this choice
@@ -300,15 +304,27 @@ class XMLGenerator:
                             if elem.local_name == choice_key:
                                 return elem
                 elif isinstance(choice_data, dict):
-                    # Complex format: with path and selected_element
+                    # Complex/Streamlit format: with path and selected_element
                     user_path = choice_data.get('path')
-                    # Check for exact match or if the parent_path ends with the user_path
-                    if (user_path == parent_path or 
-                        parent_path.endswith(f".{user_path}") or
-                        parent_path.endswith(user_path)):
-                        selected_name = choice_data.get('selected_element')
+                    selected_element_name = choice_data.get('selected_element')
+                    
+                    # Check path matching (for specific choice locations)
+                    path_matches = (user_path == parent_path or 
+                                  parent_path.endswith(f".{user_path}") or
+                                  parent_path.endswith(user_path)) if user_path else False
+                    
+                    # For Streamlit format, also check if any element name matches selected_element
+                    if selected_element_name:
                         for elem in choice_elements:
-                            if elem.local_name == selected_name:
+                            if elem.local_name == selected_element_name:
+                                # If path matches or we don't have specific path info, use this selection
+                                if path_matches or not user_path:
+                                    return elem
+                    
+                    # Legacy path-based matching
+                    if path_matches and selected_element_name:
+                        for elem in choice_elements:
+                            if elem.local_name == selected_element_name:
                                 return elem
         
         # Default: select first element
@@ -372,9 +388,6 @@ class XMLGenerator:
                         selected_element = self._select_choice_element(choice_elements, current_path)
                         if selected_element:
                             child_name = self._format_element_name(selected_element)
-                            is_optional, occurrence_info = self._get_element_occurrence_info(selected_element)
-                            
-                            result[f"_comment_{child_name}"] = f"{occurrence_info} (selected choice)"
                             
                             if selected_element.max_occurs is None or selected_element.max_occurs > 1:
                                 count = self._get_element_count(child_name, selected_element, depth)
@@ -389,9 +402,6 @@ class XMLGenerator:
                             for child in element.type.content.iter_elements():
                                 if child not in choice_elements:
                                     child_name = self._format_element_name(child)
-                                    is_optional, occurrence_info = self._get_element_occurrence_info(child)
-                                    
-                                    result[f"_comment_{child_name}"] = occurrence_info
                                     
                                     if child.max_occurs is None or child.max_occurs > 1:
                                         count = self._get_element_count(child_name, child, depth)
@@ -408,9 +418,6 @@ class XMLGenerator:
                         try:
                             for child in element.type.content.iter_elements():
                                 child_name = self._format_element_name(child)
-                                is_optional, occurrence_info = self._get_element_occurrence_info(child)
-                                
-                                result[f"_comment_{child_name}"] = occurrence_info
                                 
                                 if child.max_occurs is None or child.max_occurs > 1:
                                     count = self._get_element_count(child_name, child, depth)
@@ -565,11 +572,6 @@ class XMLGenerator:
             # Process elements
             for k, v in data.items():
                 if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
-                    # Add comment if exists
-                    comment_key = f"_comment_{k}"
-                    if comment_key in data:
-                        comment = etree.Comment(f" {data[comment_key]} ")
-                        parent_element.append(comment)
                     
                     # Determine qualified name
                     if ':' in k:
@@ -619,9 +621,6 @@ class XMLGenerator:
             children = []
             for k, v in data.items():
                 if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
-                    comment_key = f"_comment_{k}"
-                    if comment_key in data:
-                        children.append(f'<!-- {data[comment_key]} -->')
                     
                     if isinstance(v, list):
                         for item in v:
