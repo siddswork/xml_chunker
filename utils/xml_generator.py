@@ -347,11 +347,12 @@ class XMLGenerator:
             return {"_recursion_limit": "Maximum depth reached"}
         
         # CRITICAL: Aggressive circular reference protection
-        type_key = f"{element.local_name}_{str(element.type)}"
+        # Include path to make type_key unique per instance location
+        type_key = f"{path}_{element.local_name}_{str(element.type)}"
         if type_key in self.processed_types and depth > self.config.recursion.circular_reference_depth:
             return {"_circular_ref": f"Circular reference detected for {element.local_name}"}
         
-        # CRITICAL: Prevent processing same type multiple times at any depth > configured limit
+        # CRITICAL: Prevent processing same type multiple times at same path
         if depth > self.config.recursion.max_type_processing_depth and type_key in self.processed_types:
             return {"_type_reuse": f"Type {element.local_name} already processed"}
         
@@ -369,7 +370,12 @@ class XMLGenerator:
             
             # Process simple types
             if element.type.is_simple():
-                return self._generate_value_for_type(element.type, element.local_name)
+                value = self._generate_value_for_type(element.type, element.local_name)
+                # Ensure decimal/numeric elements never return empty values
+                if value is None or value == "":
+                    if any(keyword in element.local_name.lower() for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
+                        return 0.0  # Fallback for numeric elements
+                return value
             
             # Process complex types
             if element.type.is_complex():
@@ -441,6 +447,17 @@ class XMLGenerator:
                         except AttributeError:
                             # Handle cases where content doesn't have iter_elements (simple types)
                             pass
+            
+            # If result is empty for a complex type, it might be a decimal/numeric element that should have content
+            if not result and element.type.is_complex():
+                # Check if this looks like it should be a numeric type based on element name
+                if any(keyword in element.local_name.lower() for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
+                    # Try to generate a decimal value as fallback
+                    try:
+                        decimal_gen = self.type_factory.create_generator("decimal", {})
+                        return decimal_gen.generate(element.local_name, {})
+                    except:
+                        return 0.0  # Ultimate fallback
             
             return result
             
