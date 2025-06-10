@@ -10,6 +10,8 @@ from typing import Any, Optional, Dict, List
 from datetime import datetime
 import re
 import random
+import base64
+import uuid
 
 
 class BaseTypeGenerator(ABC):
@@ -48,12 +50,13 @@ class BaseTypeGenerator(ABC):
 class NumericTypeGenerator(BaseTypeGenerator):
     """Generator for numeric types (decimal, integer, float, double)."""
     
-    def __init__(self, config_instance=None, is_decimal: bool = True):
+    def __init__(self, config_instance=None, is_decimal: bool = True, is_integer: bool = False):
         super().__init__(config_instance)
         self.is_decimal = is_decimal
+        self.is_integer = is_integer
     
     def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> Any:
-        """Generate numeric value ensuring no empty strings."""
+        """Generate numeric value ensuring no empty strings and proper integer format."""
         # Get base value from config or default
         if self.config and element_name:
             base_value = self.config.get_data_pattern(element_name, 'int')
@@ -64,14 +67,21 @@ class NumericTypeGenerator(BaseTypeGenerator):
         if element_name and any(term in element_name.lower() for term in ['amount', 'price', 'cost', 'fee']):
             base_value = 99.99 if self.is_decimal else 100
         
+        # Handle ordinal and count elements with integers
+        if element_name and any(term in element_name.lower() for term in ['ordinal', 'count', 'number', 'sequence']):
+            base_value = 1
+            self.is_integer = True
+            self.is_decimal = False
+        
         # Apply constraints
         value = self.validate_constraints(base_value, constraints)
         
         # Ensure proper type conversion and no empty values
-        if self.is_decimal:
-            return float(value) if value is not None else 0.0
+        if self.is_integer or (not self.is_decimal):
+            # Force integer return for integer types to prevent "123.0" format
+            return int(float(value)) if value is not None else 0
         else:
-            return int(value) if value is not None else 0
+            return float(value) if value is not None else 0.0
     
     def get_type_name(self) -> str:
         return 'decimal' if self.is_decimal else 'int'
@@ -141,22 +151,80 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
         elif self.date_type == 'time':
             return now.strftime('%H:%M:%S')
         elif self.date_type == 'duration':
-            return 'PT1H30M'  # ISO 8601 duration format (1 hour 30 minutes)
+            return 'PT1H30M'  # 1 hour 30 minutes
         else:  # datetime
-            return now.strftime('%Y-%m-%dT%H:%M:%SZ')
+            return now.strftime('%Y-%m-%dT%H:%M:%S')
     
     def get_type_name(self) -> str:
         return self.date_type
     
     def get_fallback_value(self) -> str:
-        if self.date_type == 'date':
-            return '2024-06-08'
-        elif self.date_type == 'time':
-            return '12:00:00'
-        elif self.date_type == 'duration':
-            return 'PT1H30M'
+        return '2024-06-08T12:00:00'
+
+
+class IDTypeGenerator(BaseTypeGenerator):
+    """Generator for xs:ID type ensuring valid XML ID format."""
+    
+    def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
+        """Generate valid XML ID - starts with letter/underscore, valid for XML."""
+        # XML IDs must start with letter or underscore, contain only valid characters
+        base_name = element_name if element_name else "ID"
+        
+        # Clean element name to make it ID-compliant
+        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name)
+        
+        # Ensure it starts with letter or underscore
+        if clean_name and clean_name[0].isdigit():
+            clean_name = 'ID_' + clean_name
+        elif not clean_name or clean_name[0] not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_':
+            clean_name = 'ID_' + clean_name
+        
+        # Add unique suffix to ensure uniqueness
+        unique_suffix = random.randint(1000, 9999)
+        return f"{clean_name}_{unique_suffix}"
+    
+    def get_type_name(self) -> str:
+        return 'ID'
+    
+    def get_fallback_value(self) -> str:
+        return 'ID_DefaultValue_1234'
+
+
+class Base64BinaryTypeGenerator(BaseTypeGenerator):
+    """Generator for xs:base64Binary type ensuring valid base64 encoding."""
+    
+    def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
+        """Generate valid base64 encoded binary data."""
+        # Generate sample binary data based on element name
+        if element_name and 'exponent' in element_name.lower():
+            # RSA exponent is typically 65537 (0x010001)
+            sample_data = b'\x01\x00\x01'
+        elif element_name and 'modulus' in element_name.lower():
+            # Sample RSA modulus (small for testing)
+            sample_data = b'Sample RSA Modulus 1024-bit key data for testing purposes only'
+        elif element_name and any(keyword in element_name.lower() for keyword in ['key', 'signature', 'cert']):
+            # Sample cryptographic data
+            sample_data = f"Sample cryptographic data for {element_name}".encode('utf-8')
         else:
-            return '2024-06-08T12:00:00Z'
+            # Generic binary data
+            sample_data = f"SampleBinaryData_{element_name}".encode('utf-8')
+        
+        # Apply length constraint if specified
+        if constraints and 'exact_length' in constraints:
+            target_length = constraints['exact_length']
+            # Adjust data to produce roughly target base64 length
+            # Base64 encoding inflates by ~4/3, so binary should be ~3/4 of target
+            binary_length = max(1, (target_length * 3) // 4)
+            sample_data = sample_data[:binary_length].ljust(binary_length, b'0')
+        
+        # Encode to base64
+        return base64.b64encode(sample_data).decode('ascii')
+    
+    def get_type_name(self) -> str:
+        return 'base64Binary'
+    
+    def get_fallback_value(self) -> str:
+        return base64.b64encode(b'DefaultSampleData').decode('ascii')
 
 
 class StringTypeGenerator(BaseTypeGenerator):
@@ -368,6 +436,94 @@ class StringTypeGenerator(BaseTypeGenerator):
             return value + ('X' * padding_needed)
 
 
+class IDTypeGenerator(BaseTypeGenerator):
+    """Generator for xs:ID types ensuring valid XML ID format."""
+    
+    def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
+        """Generate valid XML ID values that start with letter/underscore."""
+        # XML ID must start with letter or underscore, followed by letters, digits, hyphens, dots, underscores
+        import random
+        import string
+        
+        # Create a valid ID based on element name if available
+        if element_name:
+            # Remove namespace prefix if present
+            local_name = element_name.split(':')[-1] if ':' in element_name else element_name
+            # Create ID starting with letter and element name
+            base_id = f"ID_{local_name}_{random.randint(1, 9999)}"
+        else:
+            # Generic ID
+            base_id = f"ID_{random.randint(1, 9999)}"
+        
+        # Ensure ID starts with letter and contains only valid characters
+        valid_id = ''.join(c if c.isalnum() or c in '_-.' else '_' for c in base_id)
+        if not valid_id[0].isalpha() and valid_id[0] != '_':
+            valid_id = 'ID_' + valid_id
+        
+        return valid_id
+    
+    def get_type_name(self) -> str:
+        return 'ID'
+    
+    def get_fallback_value(self) -> str:
+        return "ID_123"
+
+
+class Base64BinaryTypeGenerator(BaseTypeGenerator):
+    """Generator for xs:base64Binary types ensuring valid base64 encoding."""
+    
+    def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
+        """Generate valid base64Binary values."""
+        import base64
+        import random
+        
+        # Create sample binary data based on element purpose
+        if element_name and any(term in element_name.lower() for term in ['signature', 'key', 'modulus', 'exponent']):
+            # For cryptographic elements, generate longer base64 data
+            sample_data = f"CryptographicData_{element_name}_{random.randint(1000, 9999)}".encode('utf-8')
+            # Pad to make it longer for realistic crypto data
+            sample_data += b'0' * random.randint(50, 200)
+        else:
+            # For general binary data
+            sample_data = f"BinaryData_{element_name or 'Sample'}_{random.randint(100, 999)}".encode('utf-8')
+        
+        # Encode as base64
+        base64_value = base64.b64encode(sample_data).decode('ascii')
+        
+        # Apply length constraints if specified
+        if constraints:
+            if 'max_length' in constraints:
+                max_len = constraints['max_length']
+                if len(base64_value) > max_len:
+                    # Truncate but ensure valid base64 (multiple of 4)
+                    truncated_len = (max_len // 4) * 4
+                    base64_value = base64_value[:truncated_len]
+            
+            if 'min_length' in constraints:
+                min_len = constraints['min_length']
+                while len(base64_value) < min_len:
+                    # Pad with additional base64 data
+                    additional_data = b'PADDING' * ((min_len - len(base64_value)) // 8 + 1)
+                    additional_b64 = base64.b64encode(additional_data).decode('ascii')
+                    base64_value += additional_b64
+                    if len(base64_value) > min_len:
+                        # Truncate to exact length (multiple of 4)
+                        target_len = (min_len // 4) * 4
+                        if target_len < min_len:
+                            target_len += 4  # Round up to next multiple of 4
+                        base64_value = base64_value[:target_len]
+                        break
+        
+        return base64_value
+    
+    def get_type_name(self) -> str:
+        return 'base64Binary'
+    
+    def get_fallback_value(self) -> str:
+        import base64
+        return base64.b64encode(b"SampleBinaryData").decode('ascii')
+
+
 class EnumerationTypeGenerator(BaseTypeGenerator):
     """Generator for enumerated values with smart selection and value tracking."""
     
@@ -547,6 +703,15 @@ class TypeGeneratorFactory:
         if constraints and 'enum_values' in constraints:
             return EnumerationTypeGenerator(self.config, constraints['enum_values'])
         
+        # Handle special XSD types by name inspection first
+        type_str = str(xsd_type_name).lower()
+        
+        # Check for specific XSD types that need special handling
+        if "'xs:id'" in type_str or ('xsdatomicbuiltin' in type_str and "'xs:id'" in type_str):
+            return IDTypeGenerator(self.config)
+        elif "'xs:base64binary'" in type_str or 'base64binary' in type_str:
+            return Base64BinaryTypeGenerator(self.config)
+        
         # Handle xmlschema type objects with proper introspection
         if hasattr(xsd_type_name, 'primitive_type') and xsd_type_name.primitive_type:
             primitive_type = xsd_type_name.primitive_type
@@ -557,9 +722,9 @@ class TypeGeneratorFactory:
                 if 'boolean' in primitive_name:
                     return BooleanTypeGenerator(self.config)
                 elif 'decimal' in primitive_name:
-                    return NumericTypeGenerator(self.config, is_decimal=True)
-                elif 'integer' in primitive_name:
-                    return NumericTypeGenerator(self.config, is_decimal=False)
+                    return NumericTypeGenerator(self.config, is_decimal=True, is_integer=False)
+                elif 'integer' in primitive_name or 'int' in primitive_name:
+                    return NumericTypeGenerator(self.config, is_decimal=False, is_integer=True)
                 elif 'datetime' in primitive_name:
                     return DateTimeTypeGenerator(self.config, 'datetime')
                 elif 'date' in primitive_name:
@@ -570,6 +735,10 @@ class TypeGeneratorFactory:
                     return DateTimeTypeGenerator(self.config, 'duration')
                 elif any(t in primitive_name for t in ['float', 'double']):
                     return NumericTypeGenerator(self.config, is_decimal=True)
+                elif 'id' in primitive_name and primitive_name.endswith('id'):
+                    return IDTypeGenerator(self.config)
+                elif 'base64binary' in primitive_name:
+                    return Base64BinaryTypeGenerator(self.config)
                 elif any(t in primitive_name for t in ['string', 'token', 'normalizedstring']):
                     return StringTypeGenerator(self.config)
         
@@ -596,9 +765,9 @@ class TypeGeneratorFactory:
         if 'xsdatomicbuiltin' in type_str:
             # Extract the actual type from XsdAtomicBuiltin(name='xs:type')
             if "'xs:decimal'" in type_str or "'xs:float'" in type_str or "'xs:double'" in type_str:
-                return NumericTypeGenerator(self.config, is_decimal=True)
+                return NumericTypeGenerator(self.config, is_decimal=True, is_integer=False)
             elif "'xs:integer'" in type_str or "'xs:int'" in type_str or "'xs:long'" in type_str:
-                return NumericTypeGenerator(self.config, is_decimal=False)
+                return NumericTypeGenerator(self.config, is_decimal=False, is_integer=True)
             elif "'xs:datetime'" in type_str:
                 return DateTimeTypeGenerator(self.config, 'datetime')
             elif "'xs:date'" in type_str:
@@ -612,9 +781,9 @@ class TypeGeneratorFactory:
         
         # Fallback string-based detection
         if any(t in type_str for t in ['decimal', 'float', 'double']):
-            return NumericTypeGenerator(self.config, is_decimal=True)
+            return NumericTypeGenerator(self.config, is_decimal=True, is_integer=False)
         elif any(t in type_str for t in ['integer', 'int', 'long', 'short']):
-            return NumericTypeGenerator(self.config, is_decimal=False)
+            return NumericTypeGenerator(self.config, is_decimal=False, is_integer=True)
         elif 'boolean' in type_str:
             return BooleanTypeGenerator(self.config)
         elif 'datetime' in type_str:
@@ -623,6 +792,10 @@ class TypeGeneratorFactory:
             return DateTimeTypeGenerator(self.config, 'date')
         elif 'time' in type_str:
             return DateTimeTypeGenerator(self.config, 'time')
+        elif "'xs:id'" in type_str or 'xsdatomicbuiltin' in type_str and 'id' in type_str:
+            return IDTypeGenerator(self.config)
+        elif 'base64binary' in type_str:
+            return Base64BinaryTypeGenerator(self.config)
         elif 'anyuri' in type_str:
             return StringTypeGenerator(self.config)  # URIs are strings
         else:

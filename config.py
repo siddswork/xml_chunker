@@ -20,7 +20,7 @@ class RecursionLimits:
 @dataclass 
 class IterativeProcessing:
     """Configuration for iterative XML generation (memory safe, no recursion)."""
-    enable_iterative_processing: bool = True  # Enable iterative approach by default
+    enable_iterative_processing: bool = False  # Use recursive approach for correct sequence order
     max_processing_depth: int = 50  # Maximum depth for iterative processing
     max_elements_per_queue: int = 10000  # Maximum elements in processing queue
     enable_constraint_caching: bool = True  # Enable constraint extraction caching
@@ -164,7 +164,7 @@ class UISettings:
     """Configuration for UI-related settings."""
     default_page_title: str = "XML Chunker"
     max_file_upload_mb: int = 10
-    default_tree_depth: int = 4
+    default_tree_depth: int = 8  # Increased depth to show more schema levels
     show_debug_info: bool = False
     enable_download: bool = True
 
