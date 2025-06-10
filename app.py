@@ -168,19 +168,28 @@ def analyze_xsd_schema(xsd_file_path):
     """
     return schema_analyzer.analyze_xsd_schema(xsd_file_path)
 
-def convert_tree_to_streamlit_format(node, parent_path=""):
+def convert_tree_to_streamlit_format(node, parent_path="", node_counter=None):
     """
     Convert our tree node format to streamlit_tree_select format.
     
     Args:
         node: Our tree node data
         parent_path: Path for unique node identification
+        node_counter: Counter to ensure unique values
         
     Returns:
         Dictionary in streamlit_tree_select format
     """
-    # Create unique value for this node
-    node_value = f"{parent_path}.{node['name']}" if parent_path else node['name']
+    # Initialize counter if not provided
+    if node_counter is None:
+        node_counter = {'count': 0}
+    
+    # Create unique value for this node with counter to prevent duplicates
+    # Clean the node name to avoid special characters that might cause issues
+    clean_name = str(node.get('name', 'Unknown')).replace(' ', '_').replace(':', '_').replace('[', '_').replace(']', '_')
+    base_value = f"{parent_path}.{clean_name}" if parent_path else clean_name
+    node_value = f"{base_value}_{node_counter['count']}"
+    node_counter['count'] += 1
     
     # Determine icon and type info based on node type
     if node['is_choice']:
@@ -192,7 +201,10 @@ def convert_tree_to_streamlit_format(node, parent_path=""):
         type_info = f"[{node['occurs']['min']}-{max_display}]"
     else:
         icon = "📝"
-        type_info = "[1:1]"
+        # CRITICAL: Show actual min/max occurs, not hardcoded [1:1]
+        min_val = node['occurs']['min']
+        max_val = node['occurs']['max']
+        type_info = f"[{min_val}:{max_val}]"
     
     # Show type info for simple types
     if '_type_info' in node:
@@ -223,29 +235,35 @@ def convert_tree_to_streamlit_format(node, parent_path=""):
         for option in node['choice_options']:
             max_display = "∞" if option['max_occurs'] == 'unbounded' or option['max_occurs'] is None else option['max_occurs']
             choice_label = f"⚬ {option['name']} ({option['min_occurs']}-{max_display})"
+            choice_value = f"{node_value}.choice.{option['name']}_{node_counter['count']}"
+            node_counter['count'] += 1
             children.append({
                 "label": choice_label,
-                "value": f"{node_value}.choice.{option['name']}"
+                "value": choice_value
             })
     
     # Add regular children
     if node.get('children', []):
         for child in node['children']:
-            child_node = convert_tree_to_streamlit_format(child, node_value)
+            child_node = convert_tree_to_streamlit_format(child, base_value, node_counter)
             children.append(child_node)
     
     # Add error/type info as children if present
     if '_type_info' in node:
+        info_value = f"{node_value}.info_{node_counter['count']}"
+        node_counter['count'] += 1
         children.append({
             "label": f"ℹ️ {node['_type_info']}",
-            "value": f"{node_value}.info"
+            "value": info_value
         })
     
     if '_error' in node:
         error_icon = "📄" if "Simple type element" in node['_error'] else "⚠️"
+        error_value = f"{node_value}.error_{node_counter['count']}"
+        node_counter['count'] += 1
         children.append({
             "label": f"{error_icon} {node['_error']}",
-            "value": f"{node_value}.error"
+            "value": error_value
         })
     
     if children:
@@ -360,8 +378,9 @@ def main():
                             
                             # Convert our tree format to streamlit_tree_select format
                             tree_nodes = []
+                            global_counter = {'count': 0}  # Single counter for all nodes to ensure uniqueness
                             for root_name, tree in element_tree.items():
-                                tree_node = convert_tree_to_streamlit_format(tree)
+                                tree_node = convert_tree_to_streamlit_format(tree, "", global_counter)
                                 tree_nodes.append(tree_node)
                             
                             # Display the tree with streamlit_tree_select
@@ -385,11 +404,25 @@ def main():
 
 *If tree text appears dim, try switching to Streamlit's light theme in Settings > Theme*""")
                                 
+                                # Auto-expand more levels to show tree structure better
+                                auto_expanded = []
+                                if tree_nodes:
+                                    # Expand root
+                                    auto_expanded.append(tree_nodes[0]['value'])
+                                    # Expand first few levels automatically
+                                    def add_expanded_children(node, max_level=2, current_level=0):
+                                        if current_level < max_level and 'children' in node:
+                                            for child in node['children'][:3]:  # Limit to first 3 children per level
+                                                auto_expanded.append(child['value'])
+                                                add_expanded_children(child, max_level, current_level + 1)
+                                    
+                                    add_expanded_children(tree_nodes[0])
+                                
                                 selected = tree_select(
                                     tree_nodes,
                                     key="schema_tree",
                                     check_model="leaf",  # Only leaf nodes can be checked
-                                    expanded=[tree_nodes[0]['value']] if tree_nodes else [],  # Expand root by default
+                                    expanded=auto_expanded,  # Auto-expand multiple levels
                                     no_cascade=True  # Don't cascade selections
                                 )
                                 
@@ -402,30 +435,69 @@ def main():
                         else:
                             st.info("No schema structure could be extracted from this XSD file.")
                     
-                    # Choice selection
+                    # Enhanced Choice selection - show ALL choices including nested ones
                     selected_choices = {}
                     if choices:
                         with st.expander("🔀 Choice Selection", expanded=True):
-                            st.caption("Select which elements to generate for choice constraints:")
-                            for i, choice in enumerate(choices):
-                                choice_key = f"choice_{i}"
-                                options = [f"{elem['name']} ({elem['min_occurs']}-{elem['max_occurs']})" 
-                                          for elem in choice['elements']]
-                                
-                                selected_option = st.selectbox(
-                                    f"Choice at {choice['path']}:",
-                                    options,
-                                    key=choice_key,
-                                    help=f"Select one option from this choice (min: {choice['min_occurs']}, max: {choice['max_occurs']})"
-                                )
-                                
-                                # Extract the element name from selection
-                                selected_element = selected_option.split(' (')[0]
-                                selected_choices[choice_key] = {
-                                    'path': choice['path'],
-                                    'selected_element': selected_element,
-                                    'choice_data': choice
-                                }
+                            st.caption(f"Select which elements to generate for choice constraints (Found {len(choices)} choices):")
+                            
+                            # Group choices by depth for better organization
+                            root_choices = [c for c in choices if '.' not in c['path'] or c['path'].count('.') == 0]
+                            nested_choices = [c for c in choices if '.' in c['path'] and c['path'].count('.') > 0]
+                            
+                            # Display root-level choices first
+                            if root_choices:
+                                st.markdown("**Root-level Choices:**")
+                                for i, choice in enumerate(root_choices):
+                                    choice_key = f"choice_{i}"
+                                    options = [f"{elem['name']} ({elem['min_occurs']}-{elem['max_occurs']})" 
+                                              for elem in choice['elements']]
+                                    
+                                    selected_option = st.selectbox(
+                                        f"Choice at {choice['path']}:",
+                                        options,
+                                        key=choice_key,
+                                        help=f"Select one option from this choice (min: {choice['min_occurs']}, max: {choice['max_occurs']})"
+                                    )
+                                    
+                                    # Extract the element name from selection
+                                    selected_element = selected_option.split(' (')[0]
+                                    selected_choices[choice_key] = {
+                                        'path': choice['path'],
+                                        'selected_element': selected_element,
+                                        'choice_data': choice
+                                    }
+                            
+                            # Display nested choices
+                            if nested_choices:
+                                st.markdown("**Nested Choices:**")
+                                base_index = len(root_choices)
+                                for i, choice in enumerate(nested_choices):
+                                    choice_key = f"choice_{base_index + i}"
+                                    options = [f"{elem['name']} ({elem['min_occurs']}-{elem['max_occurs']})" 
+                                              for elem in choice['elements']]
+                                    
+                                    # Create a more readable path display
+                                    path_display = choice['path'].replace('.', ' → ')
+                                    
+                                    selected_option = st.selectbox(
+                                        f"Nested choice at {path_display}:",
+                                        options,
+                                        key=choice_key,
+                                        help=f"Select one option from this nested choice (min: {choice['min_occurs']}, max: {choice['max_occurs']})"
+                                    )
+                                    
+                                    # Extract the element name from selection
+                                    selected_element = selected_option.split(' (')[0]
+                                    selected_choices[choice_key] = {
+                                        'path': choice['path'],
+                                        'selected_element': selected_element,
+                                        'choice_data': choice
+                                    }
+                            
+                            # Show summary
+                            if choices:
+                                st.info(f"ℹ️ Found {len(choices)} total choices: {len(root_choices)} root-level, {len(nested_choices)} nested")
                     
                     # Unbounded element counts
                     unbounded_counts = {}
