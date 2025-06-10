@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional, Dict, List
 from datetime import datetime
 import re
+import random
 
 
 class BaseTypeGenerator(ABC):
@@ -161,6 +162,36 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
 class StringTypeGenerator(BaseTypeGenerator):
     """Generator for string types with length and pattern constraints."""
     
+    # Comprehensive pattern library based on validation error analysis
+    AVIATION_PATTERNS = {
+        # Service and Reference Codes (highest frequency)
+        '[0-9A-Z]{1,3}': lambda: f"{random.randint(1,9)}{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(0,9)}",
+        '[0-9A-Z]{3}': lambda: f"{random.randint(0,9)}{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(0,9)}",
+        '[A-Z]{3}': lambda: ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3)),
+        '[A-Z]{2}': lambda: ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=2)),
+        
+        # Numeric Codes
+        '[0-9]{1,4}': lambda: str(random.randint(1, 9999)),
+        '[0-9]{1,8}': lambda: str(random.randint(1, 99999999)),
+        '[0-9]{2}': lambda: f"{random.randint(10, 99)}",
+        '[0-9]{3}': lambda: f"{random.randint(100, 999)}",
+        '[0-9]{4}': lambda: f"{random.randint(1000, 9999)}",
+        
+        # Payment and Business Codes
+        '(IATAC|BLTRL)[A-Za-z0-9]{2}': lambda: f"IATAC{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(0,9)}",
+        '([0-9]{7}[A-Za-z0-9]{8})': lambda: f"{random.randint(1000000, 9999999)}{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=8))}",
+        
+        # Mixed Alphanumeric
+        '[A-Za-z0-9]{2}': lambda: f"{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(0,9)}",
+        '[A-Za-z0-9]{3}': lambda: ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=3)),
+        
+        # Common regex variants (normalized forms)
+        r'[A-Z]{3}': lambda: ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3)),
+        r'[0-9]+': lambda: str(random.randint(1, 9999)),
+        r'\d+': lambda: str(random.randint(1, 9999)),
+        r'[0-9A-Z]+': lambda: ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))
+    }
+    
     def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
         """Generate string value respecting length constraints."""
         # Get base value from config
@@ -180,6 +211,68 @@ class StringTypeGenerator(BaseTypeGenerator):
         # Apply constraints
         return self.validate_constraints(base_value, constraints)
     
+    def generate_pattern_value(self, pattern_str: str) -> str:
+        """Generate value for specific pattern using comprehensive library."""
+        if pattern_str in self.AVIATION_PATTERNS:
+            return self.AVIATION_PATTERNS[pattern_str]()
+        
+        # Dynamic pattern generation for unhandled patterns
+        return self.generate_dynamic_pattern_value(pattern_str)
+    
+    def generate_dynamic_pattern_value(self, pattern_str: str) -> str:
+        """Generate value for unknown patterns using regex analysis."""
+        try:
+            # Analyze pattern and generate appropriate value
+            if re.match(r'\[0-9\]\{(\d+),?(\d+)?\}', pattern_str):
+                # Numeric range patterns like [0-9]{1,3}
+                match = re.match(r'\[0-9\]\{(\d+),?(\d+)?\}', pattern_str)
+                min_len = int(match.group(1))
+                max_len = int(match.group(2)) if match.group(2) else min_len
+                length = random.randint(min_len, max_len)
+                return ''.join([str(random.randint(0, 9)) for _ in range(length)])
+            
+            elif re.match(r'\[A-Z\]\{(\d+),?(\d+)?\}', pattern_str):
+                # Alpha range patterns like [A-Z]{2,4}
+                match = re.match(r'\[A-Z\]\{(\d+),?(\d+)?\}', pattern_str)
+                min_len = int(match.group(1))
+                max_len = int(match.group(2)) if match.group(2) else min_len
+                length = random.randint(min_len, max_len)
+                return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=length))
+            
+            elif re.match(r'\[A-Za-z0-9\]\{(\d+),?(\d+)?\}', pattern_str):
+                # Mixed alphanumeric patterns
+                match = re.match(r'\[A-Za-z0-9\]\{(\d+),?(\d+)?\}', pattern_str)
+                min_len = int(match.group(1))
+                max_len = int(match.group(2)) if match.group(2) else min_len
+                length = random.randint(min_len, max_len)
+                return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', k=length))
+            
+            # Default fallback for complex patterns
+            return "VAL123"
+            
+        except Exception:
+            # If pattern analysis fails, return safe default
+            return "DEF123"
+    
+    def test_pattern_compliance(self, value: str, pattern_str: str) -> bool:
+        """Test if generated value matches pattern."""
+        try:
+            return bool(re.match(f"^{pattern_str}$", value))
+        except re.error:
+            return False
+    
+    def validate_and_regenerate_pattern(self, value: str, pattern_str: str, max_attempts: int = 5) -> str:
+        """Validate pattern compliance and regenerate if needed."""
+        for attempt in range(max_attempts):
+            if self.test_pattern_compliance(value, pattern_str):
+                return value
+            
+            # Regenerate value using pattern-specific generator
+            value = self.generate_pattern_value(pattern_str)
+        
+        # If all attempts fail, return a safe default that might work
+        return "123"  # Numeric fallback for most patterns
+    
     def get_type_name(self) -> str:
         return 'string'
     
@@ -187,75 +280,92 @@ class StringTypeGenerator(BaseTypeGenerator):
         return "SampleText"
     
     def validate_constraints(self, value: str, constraints: Optional[Dict] = None) -> str:
-        """Apply string constraints like length limits and patterns."""
+        """Apply string constraints like length limits and patterns with enhanced validation."""
         if not constraints:
             return value
         
-        # Handle exact length first (most restrictive)
-        if 'exact_length' in constraints:
-            exact_len = constraints['exact_length']
-            if len(value) != exact_len:
-                if len(value) > exact_len:
-                    value = value[:exact_len]
-                else:
-                    value = value.ljust(exact_len, 'X')
-            return value  # Return early since exact length overrides min/max
+        # First apply length constraints
+        value = self.validate_length_constraints(value, constraints)
         
-        # Handle max length constraint
-        if 'max_length' in constraints:
-            max_len = constraints['max_length']
-            if len(value) > max_len:
-                # Try to create a meaningful shorter value
-                if max_len >= 3:
-                    value = value[:max_len]
-                else:
-                    # For very short limits, use simple values
-                    value = 'X' * max_len
-        
-        # Handle min length constraint
-        if 'min_length' in constraints:
-            min_len = constraints['min_length']
-            if len(value) < min_len:
-                # Pad with meaningful characters
-                padding_needed = min_len - len(value)
-                value = value + ('X' * padding_needed)
-        
-        # Handle pattern constraints
+        # Then apply pattern constraints with comprehensive validation
         if 'pattern' in constraints:
             pattern = constraints['pattern']
             try:
                 # Ensure pattern is a string
                 pattern_str = str(pattern) if pattern is not None else ""
-                if pattern_str and not re.match(pattern_str, value):
-                    # For common patterns, generate compliant values based on our error analysis
-                    if pattern_str == '[0-9A-Z]{1,3}':  # Service codes (most common)
-                        value = '1A2'
-                    elif pattern_str == '[0-9]{1,4}':  # Flight numbers
-                        value = '1234'
-                    elif pattern_str == '[0-9A-Z]{3}':  # Aircraft codes
-                        value = '320'
-                    elif pattern_str == '(IATAC|BLTRL)[A-Za-z0-9]{2}':  # Payment rule codes
-                        value = 'IATAC1'
-                    elif pattern_str == '([0-9]{7}[A-Za-z0-9]{8})':  # Clearance IDs
-                        value = '1234567AB123456'
-                    elif pattern_str == '[0-9]{1,8}':  # IIN numbers
-                        value = '12345678'
-                    elif pattern_str == r'[A-Z]{3}':  # Country/currency codes
-                        value = 'USD'
-                    elif pattern_str == r'[A-Z]{2}':
-                        value = 'US'
-                    elif pattern_str == r'[A-Za-z]{2}':
-                        value = 'EN'
-                    elif pattern_str == r'\d+':  # Numeric strings
-                        value = '123'
-                    else:
-                        # Keep original value as fallback
-                        pass
+                if pattern_str:
+                    # Use enhanced pattern validation and regeneration
+                    value = self.validate_and_regenerate_pattern(value, pattern_str)
             except re.error:
                 # Invalid regex pattern, skip pattern validation
                 pass
         
         return value
+    
+    def validate_length_constraints(self, value: str, constraints: Dict) -> str:
+        """Comprehensive length constraint validation with smart adjustments."""
+        
+        # Exact length has highest priority
+        if 'exact_length' in constraints:
+            target_length = constraints['exact_length']
+            return self.adjust_to_exact_length(value, target_length)
+        
+        # Apply min/max length constraints
+        min_len = constraints.get('min_length', 0)
+        max_len = constraints.get('max_length', float('inf'))
+        
+        current_length = len(value)
+        
+        # Truncate if too long
+        if current_length > max_len:
+            value = self.smart_truncate(value, max_len)
+        
+        # Pad if too short
+        elif current_length < min_len:
+            value = self.smart_pad(value, min_len)
+        
+        return value
+    
+    def adjust_to_exact_length(self, value: str, target_length: int) -> str:
+        """Adjust string to exact length requirement."""
+        current_length = len(value)
+        
+        if current_length == target_length:
+            return value
+        elif current_length > target_length:
+            return self.smart_truncate(value, target_length)
+        else:
+            return self.smart_pad(value, target_length)
+    
+    def smart_truncate(self, value: str, max_length: int) -> str:
+        """Intelligently truncate while preserving meaning."""
+        if len(value) <= max_length:
+            return value
+        
+        # Handle edge case of zero length
+        if max_length == 0:
+            return ''
+        
+        # For any positive length, just truncate the original value
+        return value[:max_length]
+    
+    def smart_pad(self, value: str, min_length: int) -> str:
+        """Intelligently pad to meet minimum length."""
+        if len(value) >= min_length:
+            return value
+        
+        padding_needed = min_length - len(value)
+        
+        # Use context-appropriate padding
+        if value.isdigit():
+            # Numeric values - pad with zeros or digits
+            return value + '0' * padding_needed
+        elif value.isalpha():
+            # Alphabetic values - pad with letters
+            return value + 'X' * padding_needed
+        else:
+            # Mixed content - pad with alphanumeric
+            return value + ('X' * padding_needed)
 
 
 class EnumerationTypeGenerator(BaseTypeGenerator):
@@ -269,20 +379,25 @@ class EnumerationTypeGenerator(BaseTypeGenerator):
         self.enum_values = enum_values or []
     
     def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
-        """Generate value from enumeration list with smart selection and tracking."""
-        # Extract enum values from constraints if provided
+        """Enhanced enumeration generation with robust fallbacks and validation."""
+        
+        # Extract enum values with multiple strategies
+        enum_list = []
+        
         if constraints and 'enum_values' in constraints:
             enum_list = constraints['enum_values']
-        else:
+        elif self.enum_values:
             enum_list = self.enum_values
         
-        if not enum_list:
-            return self.get_fallback_value()
+        # Filter and validate enum values - remove None/empty/invalid values
+        valid_enums = [val for val in enum_list if val and val.strip() and val != 'None' and str(val) != 'None']
         
-        # Filter out 'None' values which are just XSD placeholders
-        valid_enums = [val for val in enum_list if val != 'None']
         if not valid_enums:
-            valid_enums = enum_list  # Use all if no non-None values
+            # Try element-specific fallbacks first, then use general fallback
+            fallback_value = self.get_element_specific_fallback(element_name)
+            if fallback_value == "VALUE":  # No specific fallback found
+                return self.get_fallback_value()
+            return fallback_value
         
         # Smart selection with tracking for variety
         selected_value = self._select_enum_value(element_name, valid_enums)
@@ -330,6 +445,81 @@ class EnumerationTypeGenerator(BaseTypeGenerator):
     
     def get_type_name(self) -> str:
         return 'enum'
+    
+    def get_element_specific_fallback(self, element_name: str) -> str:
+        """Provide element-specific enumeration fallbacks for aviation schemas."""
+        fallbacks = {
+            # Currency and Country Codes
+            'currencycode': 'USD',
+            'countrycode': 'US', 
+            'languagecode': 'EN',
+            'iata_locationcode': 'LAX',
+            
+            # Tax and Payment Codes
+            'taxtypecode': 'TAX',
+            'paymentmethodcode': 'CC',
+            'statuscode': 'OK',
+            
+            # Cabin and Class Codes
+            'classcode': 'Y',
+            'cabincode': 'Y',
+            'cabintypecode': 'Y',
+            'cabintypename': 'Economy',
+            
+            # Baggage and Rules
+            'bagrulecode': 'Y',
+            'bagdisclosurerulecode': 'Y',
+            
+            # Measurements
+            'weightunitofmeasurement': 'KGM',
+            'lengthunitofmeasurement': 'CMT',
+            
+            # Personal Info
+            'gendercode': 'M',
+            'documenttypecode': 'PP',
+            'passengertypecode': 'ADT',
+            'name': 'Father Surname',  # For AddlNameTypeCode
+            'typename': 'Father Surname',
+            'addlnametype': 'Father Surname',
+            
+            # Seat and Service
+            'seatcharacteristiccode': 'A',
+            'mealcode': 'KSML',
+            
+            # Airline and Aircraft
+            'airlinecode': 'AA',
+            'airlinedesigcode': 'AA',
+            'aircraftcode': '320',
+            'airportcode': 'LAX',
+            
+            # Applied/Exempt type patterns
+            'applied': 'Applied',
+            'exempt': 'Exempt',
+            'appliedexempt': 'Applied',
+            
+            # Action codes
+            'actioncode': 'Add',
+            'action': 'Add',
+            
+            # Disclosure rules
+            'disclosurerule': 'D',
+            'disclosure': 'D',
+            
+            # Common IATA patterns
+            'typecode': 'Other',
+            'code': 'ABC',
+            'type': 'Other',
+            'taxonomycode': 'ABC',
+            'codeset': 'ABC',
+        }
+        
+        # Match by element name patterns (case insensitive)
+        element_lower = element_name.lower()
+        for pattern, fallback in fallbacks.items():
+            if pattern in element_lower:
+                return fallback
+        
+        return "VALUE"  # Ultimate fallback
     
     def get_fallback_value(self) -> str:
         return "EnumValue"

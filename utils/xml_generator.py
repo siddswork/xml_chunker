@@ -107,9 +107,18 @@ class XMLGenerator:
         # Extract constraints from the type
         constraints = self._extract_type_constraints(type_name)
         
-        # Check for enumeration constraints first
+        # Check for enumeration constraints first - comprehensive approach
         if hasattr(type_name, 'enumeration') and type_name.enumeration:
             constraints['enum_values'] = [str(value) for value in type_name.enumeration]
+        
+        # Additional enumeration extraction for xmlschema objects
+        if hasattr(type_name, 'facets') and not constraints.get('enum_values'):
+            # Look for enumeration facets directly
+            for facet_name, facet in type_name.facets.items():
+                if facet_name and 'enumeration' in str(facet_name).lower():
+                    if hasattr(facet, 'enumeration') and facet.enumeration:
+                        constraints['enum_values'] = [str(val) for val in facet.enumeration]
+                        break
         
         # Create appropriate type generator and generate value
         generator = self.type_factory.create_generator(type_name, constraints)
@@ -136,7 +145,21 @@ class XMLGenerator:
                 elif local_name == 'length':
                     constraints['exact_length'] = facet.value
                 elif local_name == 'pattern':
-                    constraints['pattern'] = facet.value
+                    # Handle XsdPatternFacets objects which store patterns in regexps attribute
+                    if hasattr(facet, 'regexps') and facet.regexps:
+                        # Use the first pattern if multiple patterns exist
+                        constraints['pattern'] = facet.regexps[0]
+                    elif hasattr(facet, 'value') and facet.value is not None:
+                        constraints['pattern'] = facet.value
+                    else:
+                        # Fallback: try to extract from string representation
+                        facet_str = str(facet)
+                        if 'XsdPatternFacets' in facet_str and '[' in facet_str and ']' in facet_str:
+                            # Extract pattern from string like "XsdPatternFacets(['[0-9]{10}'])"
+                            import re
+                            pattern_match = re.search(r"\['([^']+)'\]", facet_str)
+                            if pattern_match:
+                                constraints['pattern'] = pattern_match.group(1)
                 elif local_name == 'minInclusive':
                     constraints['min_value'] = facet.value
                 elif local_name == 'maxInclusive':
@@ -152,10 +175,40 @@ class XMLGenerator:
                     elif hasattr(facet, 'value') and facet.value is not None:
                         constraints['enum_values'].append(str(facet.value))
         
+        # Additional enumeration extraction methods
+        if 'enum_values' not in constraints or not constraints['enum_values']:
+            # Method 1: Direct enumeration attribute
+            if hasattr(type_name, 'enumeration') and type_name.enumeration:
+                constraints['enum_values'] = [str(val) for val in type_name.enumeration]
+            
+            # Method 2: Check validators for enumeration
+            elif hasattr(type_name, 'validators'):
+                for validator in type_name.validators:
+                    if hasattr(validator, 'enumeration') and validator.enumeration:
+                        constraints['enum_values'] = [str(val) for val in validator.enumeration]
+                        break
+            
+            # Method 3: Check primitive_type enumeration
+            elif hasattr(type_name, 'primitive_type') and hasattr(type_name.primitive_type, 'enumeration'):
+                if type_name.primitive_type.enumeration:
+                    constraints['enum_values'] = [str(val) for val in type_name.primitive_type.enumeration]
+        
         # If no constraints found, check base_type for inherited constraints (like Type -> ContentType)
         if not constraints and hasattr(type_name, 'base_type') and type_name.base_type:
             base_constraints = self._extract_type_constraints(type_name.base_type)
             constraints.update(base_constraints)
+        
+        # Final fallback: if still no enumeration values, check if this is an enumeration type by name
+        if 'enum_values' not in constraints or not constraints['enum_values']:
+            type_str = str(type_name).lower()
+            if any(keyword in type_str for keyword in ['enum', 'code', 'type']) and hasattr(type_name, 'name'):
+                type_local_name = str(type_name.name).split('}')[-1] if '}' in str(type_name.name) else str(type_name.name)
+                # Try to find this type in our known enumeration types
+                for schema_type_name, schema_type in self.schema.maps.types.items():
+                    if type_local_name in str(schema_type_name) and hasattr(schema_type, 'enumeration'):
+                        if schema_type.enumeration:
+                            constraints['enum_values'] = [str(val) for val in schema_type.enumeration]
+                            break
         
         return constraints
     
@@ -371,10 +424,24 @@ class XMLGenerator:
             # Process simple types
             if element.type.is_simple():
                 value = self._generate_value_for_type(element.type, element.local_name)
-                # Ensure decimal/numeric elements never return empty values
+                # Ensure no elements return empty values - provide appropriate fallbacks
                 if value is None or value == "":
+                    # Numeric elements fallback
                     if any(keyword in element.local_name.lower() for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
-                        return 0.0  # Fallback for numeric elements
+                        return 0.0
+                    # Boolean elements fallback
+                    elif any(keyword in element.local_name.lower() for keyword in ['ind', 'flag', 'enable', 'allow']):
+                        return 'true'
+                    # Enumeration-like elements fallback
+                    elif any(keyword in element.local_name.lower() for keyword in ['code', 'type', 'status']):
+                        # Use enumeration-specific fallback generator
+                        return self._generate_fallback_for_empty_element(element.local_name, None)
+                    # Date/time elements fallback
+                    elif any(keyword in element.local_name.lower() for keyword in ['date', 'time']):
+                        return '2024-06-08T12:00:00Z'
+                    # General string fallback
+                    else:
+                        return f"Sample{element.local_name}"
                 return value
             
             # Process complex types
@@ -622,15 +689,104 @@ class XMLGenerator:
                             if isinstance(item, dict):
                                 self._build_xml_tree(child_element, item)
                             else:
-                                child_element.text = str(item)
+                                # Prevent empty list items
+                                if item is not None and str(item).strip():
+                                    child_element.text = str(item)
+                                else:
+                                    fallback_value = self._generate_fallback_for_empty_element(k, qname)
+                                    child_element.text = fallback_value
                     else:
                         child_element = etree.SubElement(parent_element, qname)
                         if isinstance(v, dict):
                             self._build_xml_tree(child_element, v)
                         else:
-                            child_element.text = str(v)
+                            # Prevent empty elements - ensure we have valid content
+                            if v is not None and str(v).strip():
+                                child_element.text = str(v)
+                            else:
+                                # Generate appropriate fallback value based on element name
+                                fallback_value = self._generate_fallback_for_empty_element(k, qname)
+                                child_element.text = fallback_value
         else:
             parent_element.text = str(data)
+    
+    def _generate_fallback_for_empty_element(self, element_name: str, qname) -> str:
+        """Generate appropriate fallback value for empty elements based on name patterns."""
+        element_lower = element_name.lower()
+        
+        # First try enumeration-specific fallbacks for common IATA patterns
+        enumeration_patterns = {
+            'iata_locationcode': 'LAX',
+            'airlinedesigcode': 'AA',
+            'cabintypecode': 'Y',
+            'cabintypename': 'Economy',
+            'currencycode': 'USD',
+            'countrycode': 'US',
+            'bagrulecode': 'Y',
+            'bagdisclosurerulecode': 'D',
+            'actioncode': 'Add',
+            'statuscode': 'OK',
+            'weightunitofmeasurement': 'KGM',
+            'lengthunitofmeasurement': 'CMT',
+            'appliedexempt': 'Applied',
+            'disclosure': 'D',
+            'taxonomycode': 'ABC',
+            'codeset': 'ABC',
+            'typename': 'Father Surname',
+            'name': 'Father Surname',
+        }
+        
+        # Check for enumeration patterns first
+        for pattern, value in enumeration_patterns.items():
+            if pattern in element_lower:
+                return value
+        
+        # Generic enumeration patterns
+        if any(keyword in element_lower for keyword in ['code', 'type', 'status']):
+            # Special cases for known enumeration patterns
+            if 'applied' in element_lower or 'exempt' in element_lower:
+                return 'Applied'
+            elif 'disclosure' in element_lower:
+                return 'D'
+            elif 'action' in element_lower:
+                return 'Add'
+            elif 'currency' in element_lower:
+                return 'USD'
+            elif 'country' in element_lower:
+                return 'US'
+            elif 'cabin' in element_lower:
+                return 'Y'
+            elif 'airline' in element_lower:
+                return 'AA'
+            else:
+                return 'ABC'  # Generic code fallback
+        
+        # Amount and price related elements
+        if any(keyword in element_lower for keyword in ['amount', 'price', 'cost', 'fee', 'rate', 'fare']):
+            return '99.99'
+        
+        # Percentage and measurement elements
+        if any(keyword in element_lower for keyword in ['percent', 'ratio', 'measure']):
+            return '10.0'
+        
+        # Boolean-like elements
+        if any(keyword in element_lower for keyword in ['ind', 'flag', 'enable', 'allow']):
+            return 'true'
+        
+        # Numeric elements
+        if any(keyword in element_lower for keyword in ['number', 'count', 'quantity', 'sequence']):
+            return '123'
+        
+        # Date/time elements
+        if any(keyword in element_lower for keyword in ['date', 'time']):
+            return '2024-06-08T12:00:00Z'
+        
+        # Text and description elements
+        if any(keyword in element_lower for keyword in ['text', 'name', 'description', 'title']):
+            return 'SampleText'
+        
+        # Default fallback
+        return 'DefaultValue'
     
     def _dict_to_xml(self, element_name: str, data: Union[Dict[str, Any], str, int, float, bool, None], namespace_prefix: str = '') -> str:
         """Convert a dictionary to XML string (fallback method)."""
