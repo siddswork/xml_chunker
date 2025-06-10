@@ -12,21 +12,186 @@ from typing import Dict, Any, Optional, Union, List, Tuple, Set
 from datetime import datetime
 import xmlschema
 from lxml import etree
+from collections import deque
+from config import get_config
+from .type_generators import TypeGeneratorFactory
+
+
+class IterativeConstraintExtractor:
+    """Iterative constraint extraction with built-in caching for memory safety."""
+    
+    def __init__(self, schema, max_depth: int = 50):
+        """Initialize with schema and configurable depth limits."""
+        self.schema = schema
+        self.max_depth = max_depth
+        self.constraint_cache = {}  # Cache resolved constraints by type ID
+        self.type_resolution_cache = {}  # Cache type resolutions
+        
+    def extract_constraints_with_cache(self, type_name) -> Dict[str, Any]:
+        """Extract constraints with aggressive caching to avoid reprocessing."""
+        if type_name is None:
+            return {}
+            
+        type_id = id(type_name)
+        
+        # Return cached result if available
+        if type_id in self.constraint_cache:
+            return self.constraint_cache[type_id].copy()
+        
+        # Extract constraints iteratively
+        constraints = self._extract_iteratively(type_name)
+        
+        # Cache the result
+        self.constraint_cache[type_id] = constraints.copy()
+        return constraints
+    
+    def _extract_iteratively(self, root_type) -> Dict[str, Any]:
+        """Iterative constraint extraction using explicit stack to prevent recursion."""
+        constraints = {}
+        
+        # Use stack for iterative processing - (type, depth, context)
+        type_stack = [(root_type, 0, 'root')]
+        visited_types = set()  # Track visited types by ID to prevent cycles
+        
+        while type_stack:
+            current_type, depth, context = type_stack.pop()
+            
+            # Safety checks
+            if current_type is None or depth > self.max_depth:
+                continue
+                
+            type_id = id(current_type)
+            if type_id in visited_types:
+                continue  # Skip already processed types
+                
+            visited_types.add(type_id)
+            
+            # Extract direct constraints from current type
+            direct_constraints = self._extract_direct_facets(current_type)
+            constraints.update(direct_constraints)
+            
+            # Queue related types for processing
+            self._queue_related_types(current_type, type_stack, depth, visited_types)
+        
+        return constraints
+    
+    def _extract_direct_facets(self, type_obj) -> Dict[str, Any]:
+        """Extract direct facets from a type object."""
+        constraints = {}
+        
+        # Extract facets (length, pattern, min/max values, enumeration)
+        if hasattr(type_obj, 'facets') and type_obj.facets:
+            for facet_name, facet in type_obj.facets.items():
+                if facet_name is None:
+                    continue
+                    
+                # Handle both namespaced and simple facet names
+                local_name = facet_name.split('}')[-1] if '}' in str(facet_name) else str(facet_name)
+                
+                if local_name == 'maxLength':
+                    constraints['max_length'] = facet.value
+                elif local_name == 'minLength':
+                    constraints['min_length'] = facet.value
+                elif local_name == 'length':
+                    constraints['exact_length'] = facet.value
+                elif local_name == 'pattern':
+                    self._extract_pattern_constraint(facet, constraints)
+                elif local_name == 'minInclusive':
+                    constraints['min_value'] = facet.value
+                elif local_name == 'maxInclusive':
+                    constraints['max_value'] = facet.value
+                elif local_name == 'enumeration':
+                    self._extract_enumeration_constraint(facet, constraints)
+        
+        # Additional enumeration extraction methods
+        self._extract_additional_enumerations(type_obj, constraints)
+        
+        return constraints
+    
+    def _extract_pattern_constraint(self, facet, constraints: Dict[str, Any]):
+        """Extract pattern constraints from facet."""
+        if hasattr(facet, 'regexps') and facet.regexps:
+            constraints['pattern'] = facet.regexps[0]
+        elif hasattr(facet, 'value') and facet.value is not None:
+            constraints['pattern'] = facet.value
+        else:
+            # Fallback: extract from string representation
+            facet_str = str(facet)
+            if 'XsdPatternFacets' in facet_str and '[' in facet_str and ']' in facet_str:
+                import re
+                pattern_match = re.search(r"\['([^']+)'\]", facet_str)
+                if pattern_match:
+                    constraints['pattern'] = pattern_match.group(1)
+    
+    def _extract_enumeration_constraint(self, facet, constraints: Dict[str, Any]):
+        """Extract enumeration constraints from facet."""
+        if 'enum_values' not in constraints:
+            constraints['enum_values'] = []
+        
+        # Handle XsdEnumerationFacets objects (multiple enum values)
+        if hasattr(facet, 'enumeration') and facet.enumeration:
+            constraints['enum_values'].extend([str(val) for val in facet.enumeration])
+        # Handle single enumeration facets
+        elif hasattr(facet, 'value') and facet.value is not None:
+            constraints['enum_values'].append(str(facet.value))
+    
+    def _extract_additional_enumerations(self, type_obj, constraints: Dict[str, Any]):
+        """Extract enumerations using additional methods."""
+        if 'enum_values' not in constraints or not constraints['enum_values']:
+            # Method 1: Direct enumeration attribute
+            if hasattr(type_obj, 'enumeration') and type_obj.enumeration:
+                constraints['enum_values'] = [str(val) for val in type_obj.enumeration]
+            
+            # Method 2: Check validators for enumeration
+            elif hasattr(type_obj, 'validators'):
+                for validator in type_obj.validators:
+                    if hasattr(validator, 'enumeration') and validator.enumeration:
+                        constraints['enum_values'] = [str(val) for val in validator.enumeration]
+                        break
+            
+            # Method 3: Check primitive_type enumeration
+            elif hasattr(type_obj, 'primitive_type') and hasattr(type_obj.primitive_type, 'enumeration'):
+                if type_obj.primitive_type.enumeration:
+                    constraints['enum_values'] = [str(val) for val in type_obj.primitive_type.enumeration]
+    
+    def _queue_related_types(self, current_type, type_stack: List, depth: int, visited_types: Set):
+        """Queue related types for processing."""
+        # Queue base_type for processing (this was the recursive call)
+        if hasattr(current_type, 'base_type') and current_type.base_type:
+            base_type_id = id(current_type.base_type)
+            if base_type_id not in visited_types:
+                type_stack.append((current_type.base_type, depth + 1, 'base_type'))
+        
+        # Queue content_type for processing (for complex types)
+        if hasattr(current_type, 'content_type') and current_type.content_type:
+            content_type_id = id(current_type.content_type)
+            if content_type_id not in visited_types:
+                type_stack.append((current_type.content_type, depth + 1, 'content_type'))
+        
+        # Queue primitive_type for processing
+        if hasattr(current_type, 'primitive_type') and current_type.primitive_type:
+            primitive_type_id = id(current_type.primitive_type)
+            if primitive_type_id not in visited_types:
+                type_stack.append((current_type.primitive_type, depth + 1, 'primitive_type'))
 
 
 class XMLGenerator:
     """Universal class for generating dummy XML files from any XSD schema with deep recursive parsing."""
     
-    def __init__(self, xsd_path: str):
+    def __init__(self, xsd_path: str, config_instance=None):
         """
         Initialize the universal XML generator.
         
         Args:
             xsd_path: Path to the XSD schema file
+            config_instance: Configuration instance (uses global config if None)
         """
         self.xsd_path = xsd_path
         self.schema = None
         self.processed_types = set()  # Track processed types to prevent infinite recursion
+        self.config = config_instance or get_config()
+        self.type_factory = TypeGeneratorFactory(self.config)  # Initialize type generator factory
+        self.constraint_extractor = None  # Will be initialized after schema loading
         self._load_schema()
     
     def _load_schema(self) -> None:
@@ -56,14 +221,18 @@ class XMLGenerator:
             except OSError as e:
                 print(f"Warning: Could not list directory {base_dir}: {e}")
             
-            # Create locations mapping for common IATA imports
+            # Create locations mapping for schema-specific imports
             locations = {}
+            namespace_mappings = self.config.get_namespace_mapping('iata')
+            
             for xsd_file in xsd_files:
                 try:
                     filename = os.path.basename(xsd_file)
                     if "CommonTypes" in filename:
-                        # Map common namespace patterns
-                        locations["http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes"] = [xsd_file]
+                        # Map namespace patterns from config
+                        common_types_ns = namespace_mappings.get('common_types')
+                        if common_types_ns:
+                            locations[common_types_ns] = [xsd_file]
                 except Exception as e:
                     print(f"Warning: Could not process XSD file {xsd_file}: {e}")
             
@@ -76,6 +245,9 @@ class XMLGenerator:
             
             if self.schema is None:
                 raise ValueError("Schema loaded but is None")
+            
+            # Initialize iterative constraint extractor with loaded schema
+            self.constraint_extractor = IterativeConstraintExtractor(self.schema)
                 
         except xmlschema.XMLSchemaException as e:
             raise ValueError(f"Invalid XSD schema: {e}")
@@ -86,99 +258,95 @@ class XMLGenerator:
         except Exception as e:
             raise ValueError(f"Failed to load XSD schema: {e}")
     
-    def _generate_deterministic_string(self, element_name: str = "", context: str = "") -> str:
-        """Generate a deterministic string based on element name and context."""
-        if not element_name:
-            return "SampleText"
+    
+    
+    
+    
+    
+    
+    
+    def _generate_value_for_type(self, type_name, element_name: str = "") -> Any:
+        """Generate validation-compliant value using modular type generators."""
+        # Extract constraints from the type
+        constraints = self._extract_type_constraints(type_name)
         
-        name_lower = element_name.lower()
-        if 'code' in name_lower:
-            return "ABC123"
-        elif 'id' in name_lower:
-            return f"{element_name}123456"
-        elif 'name' in name_lower:
-            return f"Sample{element_name}"
-        elif 'text' in name_lower or 'desc' in name_lower:
-            return f"Sample {element_name} description"
-        elif 'uri' in name_lower or 'url' in name_lower:
-            return "https://example.com/sample"
-        elif 'email' in name_lower:
-            return "sample@example.com"
-        elif 'currency' in name_lower:
-            return "USD"
-        elif 'lang' in name_lower:
-            return "EN"
-        elif 'version' in name_lower:
-            return "1.0"
-        elif 'type' in name_lower:
-            return "Standard"
-        else:
-            return f"Sample{element_name}"
+        # Check for enumeration constraints first - comprehensive approach
+        if hasattr(type_name, 'enumeration') and type_name.enumeration:
+            constraints['enum_values'] = [str(value) for value in type_name.enumeration]
+        
+        # Additional enumeration extraction for xmlschema objects
+        if hasattr(type_name, 'facets') and not constraints.get('enum_values'):
+            # Look for enumeration facets directly
+            for facet_name, facet in type_name.facets.items():
+                if facet_name and 'enumeration' in str(facet_name).lower():
+                    if hasattr(facet, 'enumeration') and facet.enumeration:
+                        constraints['enum_values'] = [str(val) for val in facet.enumeration]
+                        break
+        
+        # Create appropriate type generator and generate value
+        generator = self.type_factory.create_generator(type_name, constraints)
+        return generator.generate(element_name, constraints)
     
-    def _generate_deterministic_number(self, element_name: str = "") -> int:
-        """Generate a deterministic number based on element name."""
-        name_lower = element_name.lower() if element_name else ""
-        if 'count' in name_lower or 'number' in name_lower:
-            return 5
-        elif 'amount' in name_lower or 'price' in name_lower:
-            return 100
-        elif 'version' in name_lower:
-            return 1
-        elif 'sequence' in name_lower:
-            return 1
-        else:
-            return 123
+    def _extract_type_constraints(self, type_name) -> Dict[str, Any]:
+        """Extract validation constraints using iterative approach (no recursion)."""
+        if self.constraint_extractor is None:
+            # Fallback to direct extraction if extractor not initialized
+            return self._extract_direct_constraints_fallback(type_name)
+        
+        # Use iterative constraint extractor with caching
+        constraints = self.constraint_extractor.extract_constraints_with_cache(type_name)
+        
+        # Final fallback: if still no enumeration values, check schema types by name
+        if 'enum_values' not in constraints or not constraints['enum_values']:
+            self._add_schema_lookup_constraints(type_name, constraints)
+        
+        return constraints
     
-    def _generate_deterministic_decimal(self, element_name: str = "") -> float:
-        """Generate a deterministic decimal based on element name."""
-        name_lower = element_name.lower() if element_name else ""
-        if 'amount' in name_lower or 'price' in name_lower:
-            return 99.99
-        elif 'rate' in name_lower:
-            return 0.15
-        elif 'percentage' in name_lower:
-            return 10.5
-        else:
-            return 123.45
+    def _extract_direct_constraints_fallback(self, type_name) -> Dict[str, Any]:
+        """Fallback direct constraint extraction (non-iterative, for initialization)."""
+        constraints = {}
+        
+        if hasattr(type_name, 'facets') and type_name.facets:
+            for facet_name, facet in type_name.facets.items():
+                if facet_name is None:
+                    continue
+                    
+                local_name = facet_name.split('}')[-1] if '}' in str(facet_name) else str(facet_name)
+                
+                if local_name == 'maxLength':
+                    constraints['max_length'] = facet.value
+                elif local_name == 'minLength':
+                    constraints['min_length'] = facet.value
+                elif local_name == 'length':
+                    constraints['exact_length'] = facet.value
+                elif local_name == 'minInclusive':
+                    constraints['min_value'] = facet.value
+                elif local_name == 'maxInclusive':
+                    constraints['max_value'] = facet.value
+                elif local_name == 'enumeration':
+                    if 'enum_values' not in constraints:
+                        constraints['enum_values'] = []
+                    if hasattr(facet, 'enumeration') and facet.enumeration:
+                        constraints['enum_values'].extend([str(val) for val in facet.enumeration])
+                    elif hasattr(facet, 'value') and facet.value is not None:
+                        constraints['enum_values'].append(str(facet.value))
+        
+        return constraints
     
-    def _generate_deterministic_date(self, element_name: str = "") -> str:
-        """Generate a deterministic date in ISO format."""
-        return "2024-01-15"
-    
-    def _generate_deterministic_datetime(self, element_name: str = "") -> str:
-        """Generate a deterministic datetime in ISO format."""
-        return "2024-01-15T10:30:00"
-    
-    def _generate_deterministic_time(self, element_name: str = "") -> str:
-        """Generate a deterministic time."""
-        return "10:30:00"
-    
-    def _generate_deterministic_boolean(self, element_name: str = "") -> bool:
-        """Generate a deterministic boolean value."""
-        return True
-    
-    def _generate_value_for_type(self, type_name: str, element_name: str = "") -> Any:
-        """Generate a deterministic value based on the XSD type."""
+    def _add_schema_lookup_constraints(self, type_name, constraints: Dict[str, Any]):
+        """Add constraints found through schema type lookup."""
+        if not hasattr(type_name, 'name') or not self.schema:
+            return
+            
         type_str = str(type_name).lower()
-        
-        if 'string' in type_str or 'token' in type_str or 'normalizedstring' in type_str:
-            return self._generate_deterministic_string(element_name)
-        elif any(t in type_str for t in ['int', 'long', 'short', 'positiveinteger', 'nonpositiveinteger']):
-            return self._generate_deterministic_number(element_name)
-        elif any(t in type_str for t in ['decimal', 'float', 'double']):
-            return self._generate_deterministic_decimal(element_name)
-        elif 'boolean' in type_str:
-            return self._generate_deterministic_boolean(element_name)
-        elif 'datetime' in type_str:
-            return self._generate_deterministic_datetime(element_name)
-        elif 'date' in type_str:
-            return self._generate_deterministic_date(element_name)
-        elif 'time' in type_str:
-            return self._generate_deterministic_time(element_name)
-        elif 'anyuri' in type_str:
-            return "https://example.com/sample"
-        else:
-            return self._generate_deterministic_string(element_name)
+        if any(keyword in type_str for keyword in ['enum', 'code', 'type']):
+            type_local_name = str(type_name.name).split('}')[-1] if '}' in str(type_name.name) else str(type_name.name)
+            # Try to find this type in our known enumeration types
+            for schema_type_name, schema_type in self.schema.maps.types.items():
+                if type_local_name in str(schema_type_name) and hasattr(schema_type, 'enumeration'):
+                    if schema_type.enumeration:
+                        constraints['enum_values'] = [str(val) for val in schema_type.enumeration]
+                        break
     
     def _get_element_occurrence_info(self, element: xmlschema.validators.XsdElement) -> Tuple[bool, str]:
         """Get information about element occurrence constraints."""
@@ -226,19 +394,19 @@ class XMLGenerator:
                 if path in self.user_unbounded_counts:
                     user_count = max(1, self.user_unbounded_counts[path])
                     # Limit based on depth to prevent exponential growth
-                    if depth > 8:
+                    if depth > self.config.recursion.max_element_depth:
                         return min(user_count, 1)  # Force single element at deep levels
-                    elif depth > 5:
+                    elif depth > self.config.recursion.max_tree_depth:
                         return min(user_count, 2)  # Limit to 2 at moderate depth
                     return user_count
         
         # Depth-aware default count to prevent exponential growth
-        if depth > 8:
+        if depth > self.config.recursion.max_element_depth:
             return 1  # Only 1 element at very deep levels
-        elif depth > 5:
+        elif depth > self.config.recursion.max_tree_depth:
             return 1  # Reduce to 1 at moderate depth
         else:
-            return 2  # Default: 2 only at shallow levels
+            return self.config.elements.default_element_count  # Default from config
     
     def _get_namespace_prefix(self, namespace: str) -> Optional[str]:
         """Get the prefix for a given namespace."""
@@ -291,14 +459,15 @@ class XMLGenerator:
                             for child in group.iter_elements():
                                 choice_elements.append(child)
                 else:
-                    # For IATA schemas, Error and Response are typically mutually exclusive
-                    # Check if we have both Error and Response elements
+                    # For schema-specific patterns, check for configured choice patterns
                     all_elements = list(element.type.content.iter_elements())
                     element_names = [e.local_name for e in all_elements]
-                    if 'Error' in element_names and 'Response' in element_names:
-                        # These are mutually exclusive choices in IATA schemas
+                    choice_patterns = self.config.get_choice_patterns('iata')
+                    
+                    if choice_patterns and all(pattern in element_names for pattern in choice_patterns):
+                        # These are mutually exclusive choices based on config
                         for elem in all_elements:
-                            if elem.local_name in ['Error', 'Response']:
+                            if elem.local_name in choice_patterns:
                                 choice_elements.append(elem)
             except:
                 pass
@@ -312,15 +481,40 @@ class XMLGenerator:
         # Check user preferences
         if hasattr(self, 'user_choices') and self.user_choices:
             for choice_key, choice_data in self.user_choices.items():
-                user_path = choice_data.get('path')
-                # Check for exact match or if the parent_path ends with the user_path
-                if (user_path == parent_path or 
-                    parent_path.endswith(f".{user_path}") or
-                    parent_path.endswith(user_path)):
-                    selected_name = choice_data.get('selected_element')
-                    for elem in choice_elements:
-                        if elem.local_name == selected_name:
-                            return elem
+                # Handle multiple formats:
+                # 1. Simple format: {"Response": True}
+                # 2. Complex format: {"key": {"path": ..., "selected_element": ...}}
+                # 3. Streamlit format: {"choice_0": {"path": ..., "selected_element": ...}}
+                
+                if isinstance(choice_data, bool):
+                    # Simple format: look for element with matching name
+                    if choice_data:  # If True, select this choice
+                        for elem in choice_elements:
+                            if elem.local_name == choice_key:
+                                return elem
+                elif isinstance(choice_data, dict):
+                    # Complex/Streamlit format: with path and selected_element
+                    user_path = choice_data.get('path')
+                    selected_element_name = choice_data.get('selected_element')
+                    
+                    # Check path matching (for specific choice locations)
+                    path_matches = (user_path == parent_path or 
+                                  parent_path.endswith(f".{user_path}") or
+                                  parent_path.endswith(user_path)) if user_path else False
+                    
+                    # For Streamlit format, also check if any element name matches selected_element
+                    if selected_element_name:
+                        for elem in choice_elements:
+                            if elem.local_name == selected_element_name:
+                                # If path matches or we don't have specific path info, use this selection
+                                if path_matches or not user_path:
+                                    return elem
+                    
+                    # Legacy path-based matching
+                    if path_matches and selected_element_name:
+                        for elem in choice_elements:
+                            if elem.local_name == selected_element_name:
+                                return elem
         
         # Default: select first element
         return choice_elements[0]
@@ -338,16 +532,17 @@ class XMLGenerator:
             Dictionary with element structure and appropriate values
         """
         # CRITICAL: Prevent infinite recursion with much lower limit
-        if depth > 8:  # Reduced from 15 to 8
+        if depth > self.config.recursion.max_element_depth:
             return {"_recursion_limit": "Maximum depth reached"}
         
         # CRITICAL: Aggressive circular reference protection
-        type_key = f"{element.local_name}_{str(element.type)}"
-        if type_key in self.processed_types and depth > 2:  # Reduced from 5 to 2
+        # Include path to make type_key unique per instance location
+        type_key = f"{path}_{element.local_name}_{str(element.type)}"
+        if type_key in self.processed_types and depth > self.config.recursion.circular_reference_depth:
             return {"_circular_ref": f"Circular reference detected for {element.local_name}"}
         
-        # CRITICAL: Prevent processing same type multiple times at any depth > 3
-        if depth > 3 and type_key in self.processed_types:
+        # CRITICAL: Prevent processing same type multiple times at same path
+        if depth > self.config.recursion.max_type_processing_depth and type_key in self.processed_types:
             return {"_type_reuse": f"Type {element.local_name} already processed"}
         
         self.processed_types.add(type_key)
@@ -358,11 +553,32 @@ class XMLGenerator:
             
             # Handle null type
             if element.type is None:
-                return self._generate_deterministic_string(element.local_name)
+                # Use string generator for unknown types
+                string_gen = self.type_factory.create_generator("string", {})
+                return string_gen.generate(element.local_name, {})
             
             # Process simple types
             if element.type.is_simple():
-                return self._generate_value_for_type(str(element.type), element.local_name)
+                value = self._generate_value_for_type(element.type, element.local_name)
+                # Ensure no elements return empty values - provide appropriate fallbacks
+                if value is None or value == "":
+                    # Numeric elements fallback
+                    if any(keyword in element.local_name.lower() for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
+                        return 0.0
+                    # Boolean elements fallback
+                    elif any(keyword in element.local_name.lower() for keyword in ['ind', 'flag', 'enable', 'allow']):
+                        return 'true'
+                    # Enumeration-like elements fallback
+                    elif any(keyword in element.local_name.lower() for keyword in ['code', 'type', 'status']):
+                        # Use enumeration-specific fallback generator
+                        return self._generate_fallback_for_empty_element(element.local_name, None)
+                    # Date/time elements fallback
+                    elif any(keyword in element.local_name.lower() for keyword in ['date', 'time']):
+                        return '2024-06-08T12:00:00Z'
+                    # General string fallback
+                    else:
+                        return f"Sample{element.local_name}"
+                return value
             
             # Process complex types
             if element.type.is_complex():
@@ -370,7 +586,19 @@ class XMLGenerator:
                 if hasattr(element.type, 'attributes') and element.type.attributes:
                     for attr_name, attr in element.type.attributes.items():
                         if attr.type is not None:
-                            result[f'@{attr_name}'] = self._generate_value_for_type(str(attr.type), attr_name)
+                            result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name)
+                
+                # Handle complex types with simple content (like MeasureType)
+                # These have attributes AND a simple base type as content
+                if (hasattr(element.type, 'content') and element.type.content and 
+                    hasattr(element.type.content, 'is_simple') and element.type.content.is_simple()):
+                    # This is a complex type with simple content - generate the base value
+                    base_value = self._generate_value_for_type(element.type.content, element.local_name)
+                    if result:  # Has attributes
+                        result['_text'] = base_value
+                        return result
+                    else:  # No attributes, just return the value
+                        return base_value
                 
                 # Process content
                 if hasattr(element.type, 'content') and element.type.content is not None:
@@ -381,14 +609,11 @@ class XMLGenerator:
                         selected_element = self._select_choice_element(choice_elements, current_path)
                         if selected_element:
                             child_name = self._format_element_name(selected_element)
-                            is_optional, occurrence_info = self._get_element_occurrence_info(selected_element)
-                            
-                            result[f"_comment_{child_name}"] = f"{occurrence_info} (selected choice)"
                             
                             if selected_element.max_occurs is None or selected_element.max_occurs > 1:
                                 count = self._get_element_count(child_name, selected_element, depth)
                                 # CRITICAL: Limit count based on depth to prevent memory explosion
-                                safe_count = min(count, max(1, 5 - depth))  # Exponentially reduce count
+                                safe_count = min(count, max(1, self.config.recursion.max_tree_depth - depth))  # Reduce count based on config
                                 result[child_name] = [self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
                             else:
                                 result[child_name] = self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1)
@@ -398,9 +623,6 @@ class XMLGenerator:
                             for child in element.type.content.iter_elements():
                                 if child not in choice_elements:
                                     child_name = self._format_element_name(child)
-                                    is_optional, occurrence_info = self._get_element_occurrence_info(child)
-                                    
-                                    result[f"_comment_{child_name}"] = occurrence_info
                                     
                                     if child.max_occurs is None or child.max_occurs > 1:
                                         count = self._get_element_count(child_name, child, depth)
@@ -417,9 +639,6 @@ class XMLGenerator:
                         try:
                             for child in element.type.content.iter_elements():
                                 child_name = self._format_element_name(child)
-                                is_optional, occurrence_info = self._get_element_occurrence_info(child)
-                                
-                                result[f"_comment_{child_name}"] = occurrence_info
                                 
                                 if child.max_occurs is None or child.max_occurs > 1:
                                     count = self._get_element_count(child_name, child, depth)
@@ -432,11 +651,201 @@ class XMLGenerator:
                             # Handle cases where content doesn't have iter_elements (simple types)
                             pass
             
+            # If result is empty for a complex type, it might be a decimal/numeric element that should have content
+            if not result and element.type.is_complex():
+                # Check if this looks like it should be a numeric type based on element name
+                if any(keyword in element.local_name.lower() for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
+                    # Try to generate a decimal value as fallback
+                    try:
+                        decimal_gen = self.type_factory.create_generator("decimal", {})
+                        return decimal_gen.generate(element.local_name, {})
+                    except:
+                        return 0.0  # Ultimate fallback
+            
             return result
             
         finally:
             # Remove from processed types when done
             self.processed_types.discard(type_key)
+    
+    def _create_element_dict_iterative(self, root_element: xmlschema.validators.XsdElement, path: str = "", max_depth: int = 20) -> Dict[str, Any]:
+        """
+        Create element dictionary using iterative queue-based approach (no recursion).
+        
+        Args:
+            root_element: Root XSD element to process
+            path: Initial path in the schema hierarchy  
+            max_depth: Maximum processing depth for memory safety
+            
+        Returns:
+            Dictionary with element structure and appropriate values
+        """
+        # Use queue for breadth-first processing - (element, path, depth, parent_dict, parent_key)
+        element_queue = deque([(root_element, path, 0, None, None)])
+        processed_elements = set()  # Track processed elements by unique ID and path
+        result = {}
+        element_count = 0
+        max_elements = 10000  # Configurable element limit for memory safety
+        
+        while element_queue and element_count < max_elements:
+            element, current_path, depth, parent_dict, parent_key = element_queue.popleft()
+            element_count += 1
+            
+            # Safety checks for depth and circular references
+            if depth > max_depth or element is None:
+                continue
+                
+            # Create unique identifier for this element at this path
+            element_id = f"{current_path}_{element.local_name}_{id(element.type)}_{depth}"
+            if element_id in processed_elements:
+                continue  # Skip already processed elements
+            processed_elements.add(element_id)
+            
+            # Process current element
+            element_data = self._process_single_element_iterative(element, current_path, depth)
+            
+            # Store result appropriately
+            element_name = self._format_element_name(element)
+            if parent_dict is None:
+                # This is the root element
+                result = element_data
+                current_parent = result
+            else:
+                # This is a child element
+                parent_dict[parent_key] = element_data
+                current_parent = element_data
+            
+            # Queue child elements for processing if this is a complex type
+            if (element.type and element.type.is_complex() and 
+                isinstance(element_data, dict) and 
+                hasattr(element.type, 'content') and element.type.content is not None):
+                
+                self._queue_child_elements_iterative(
+                    element, current_path, depth, current_parent, element_queue
+                )
+        
+        return result
+    
+    def _process_single_element_iterative(self, element: xmlschema.validators.XsdElement, path: str, depth: int) -> Any:
+        """Process a single element without recursion."""
+        # Handle null type
+        if element.type is None:
+            string_gen = self.type_factory.create_generator("string", {})
+            return string_gen.generate(element.local_name, {})
+        
+        # Process simple types
+        if element.type.is_simple():
+            value = self._generate_value_for_type(element.type, element.local_name)
+            # Ensure no elements return empty values
+            if value is None or value == "":
+                return self._generate_element_fallback(element.local_name)
+            return value
+        
+        # Process complex types
+        if element.type.is_complex():
+            result = {}
+            
+            # Process attributes
+            if hasattr(element.type, 'attributes') and element.type.attributes:
+                for attr_name, attr in element.type.attributes.items():
+                    if attr.type is not None:
+                        result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name)
+            
+            # Handle complex types with simple content
+            if (hasattr(element.type, 'content') and element.type.content and 
+                hasattr(element.type.content, 'is_simple') and element.type.content.is_simple()):
+                base_value = self._generate_value_for_type(element.type.content, element.local_name)
+                if result:  # Has attributes
+                    result['_text'] = base_value
+                    return result
+                else:  # No attributes, just return the value
+                    return base_value
+            
+            return result
+        
+        # Fallback
+        return f"Sample{element.local_name}"
+    
+    def _queue_child_elements_iterative(self, element, current_path: str, depth: int, 
+                                       parent_dict: Dict, element_queue: deque):
+        """Queue child elements for iterative processing."""
+        try:
+            # Handle choice constructs
+            choice_elements = self._get_choice_elements(element)
+            if choice_elements and len(choice_elements) > 1:
+                # This is a choice construct - select one element
+                selected_element = self._select_choice_element(choice_elements, current_path)
+                if selected_element:
+                    child_name = self._format_element_name(selected_element)
+                    new_path = f"{current_path}.{child_name}" if current_path else child_name
+                    
+                    if selected_element.max_occurs is None or selected_element.max_occurs > 1:
+                        count = self._get_element_count(child_name, selected_element, depth)
+                        safe_count = min(count, max(1, 5 - depth))  # Limit count based on depth
+                        parent_dict[child_name] = []  # Initialize list
+                        # Queue multiple instances
+                        for i in range(safe_count):
+                            list_path = f"{new_path}[{i}]"
+                            element_queue.append((selected_element, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                            parent_dict[child_name].append({})  # Placeholder that will be filled
+                    else:
+                        element_queue.append((selected_element, new_path, depth + 1, parent_dict, child_name))
+                
+                # Process non-choice elements (sequence elements after the choice)
+                for child in element.type.content.iter_elements():
+                    if child not in choice_elements:
+                        child_name = self._format_element_name(child)
+                        new_path = f"{current_path}.{child_name}" if current_path else child_name
+                        
+                        if child.max_occurs is None or child.max_occurs > 1:
+                            count = self._get_element_count(child_name, child, depth)
+                            safe_count = min(count, max(1, 5 - depth))
+                            parent_dict[child_name] = []
+                            for i in range(safe_count):
+                                list_path = f"{new_path}[{i}]"
+                                element_queue.append((child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                                parent_dict[child_name].append({})
+                        else:
+                            element_queue.append((child, new_path, depth + 1, parent_dict, child_name))
+            else:
+                # No choice construct - process all elements normally
+                for child in element.type.content.iter_elements():
+                    child_name = self._format_element_name(child)
+                    new_path = f"{current_path}.{child_name}" if current_path else child_name
+                    
+                    if child.max_occurs is None or child.max_occurs > 1:
+                        count = self._get_element_count(child_name, child, depth)
+                        safe_count = min(count, max(1, 5 - depth))
+                        parent_dict[child_name] = []
+                        for i in range(safe_count):
+                            list_path = f"{new_path}[{i}]"
+                            element_queue.append((child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                            parent_dict[child_name].append({})
+                    else:
+                        element_queue.append((child, new_path, depth + 1, parent_dict, child_name))
+        except AttributeError:
+            # Handle cases where content doesn't have iter_elements
+            pass
+    
+    def _generate_element_fallback(self, element_name: str) -> Any:
+        """Generate fallback value for empty elements."""
+        element_lower = element_name.lower()
+        
+        # Numeric elements fallback
+        if any(keyword in element_lower for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
+            return 0.0
+        # Boolean elements fallback
+        elif any(keyword in element_lower for keyword in ['ind', 'flag', 'enable', 'allow']):
+            return 'true'
+        # Enumeration-like elements fallback
+        elif any(keyword in element_lower for keyword in ['code', 'type', 'status']):
+            return self._generate_fallback_for_empty_element(element_name, None)
+        # Date/time elements fallback
+        elif any(keyword in element_lower for keyword in ['date', 'time']):
+            return '2024-06-08T12:00:00Z'
+        # General string fallback
+        else:
+            return f"Sample{element_name}"
     
     def generate_dummy_xml_with_choices(self, selected_choices=None, unbounded_counts=None, output_path=None) -> str:
         """Generate XML with user-selected choices and unbounded counts."""
@@ -478,8 +887,17 @@ class XMLGenerator:
             self.processed_types = set()
             
             try:
-                # Create a dictionary representation of the XML
-                xml_dict = self._create_element_dict(root_element, root_name)
+                # Create a dictionary representation of the XML using iterative or recursive approach
+                if self.config.iterative.enable_iterative_processing:
+                    xml_dict = self._create_element_dict_iterative(
+                        root_element, 
+                        root_name, 
+                        max_depth=self.config.iterative.max_processing_depth
+                    )
+                    print(f"Generated XML using iterative approach (depth limit: {self.config.iterative.max_processing_depth})")
+                else:
+                    xml_dict = self._create_element_dict(root_element, root_name)
+                    print(f"Generated XML using recursive approach")
                 
                 if not xml_dict:
                     return self._create_error_xml("Generated XML dictionary is empty")
@@ -510,7 +928,12 @@ class XMLGenerator:
                 else:
                     root = etree.Element(root_name, nsmap=nsmap)
                     
-                self._build_xml_tree(root, xml_dict)
+                # Build XML tree using iterative or recursive approach
+                if self.config.iterative.enable_iterative_processing:
+                    self._build_xml_tree_iterative(root, xml_dict)
+                else:
+                    self._build_xml_tree(root, xml_dict)
+                    
                 xml_string = etree.tostring(root, encoding='utf-8', pretty_print=True, xml_declaration=False).decode('utf-8')
                 
             except Exception as tree_error:
@@ -571,14 +994,13 @@ class XMLGenerator:
                     if v is not None:
                         parent_element.set(attr_name, str(v))
             
+            # Handle text content for complex types with simple content
+            if '_text' in data:
+                parent_element.text = str(data['_text'])
+            
             # Process elements
             for k, v in data.items():
                 if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
-                    # Add comment if exists
-                    comment_key = f"_comment_{k}"
-                    if comment_key in data:
-                        comment = etree.Comment(f" {data[comment_key]} ")
-                        parent_element.append(comment)
                     
                     # Determine qualified name
                     if ':' in k:
@@ -596,15 +1018,179 @@ class XMLGenerator:
                             if isinstance(item, dict):
                                 self._build_xml_tree(child_element, item)
                             else:
-                                child_element.text = str(item)
+                                # Prevent empty list items
+                                if item is not None and str(item).strip():
+                                    child_element.text = str(item)
+                                else:
+                                    fallback_value = self._generate_fallback_for_empty_element(k, qname)
+                                    child_element.text = fallback_value
                     else:
                         child_element = etree.SubElement(parent_element, qname)
                         if isinstance(v, dict):
                             self._build_xml_tree(child_element, v)
                         else:
-                            child_element.text = str(v)
+                            # Prevent empty elements - ensure we have valid content
+                            if v is not None and str(v).strip():
+                                child_element.text = str(v)
+                            else:
+                                # Generate appropriate fallback value based on element name
+                                fallback_value = self._generate_fallback_for_empty_element(k, qname)
+                                child_element.text = fallback_value
         else:
             parent_element.text = str(data)
+    
+    def _build_xml_tree_iterative(self, root_element: etree.Element, root_data: Union[Dict[str, Any], str, int, float, bool, None]) -> None:
+        """Build XML tree using iterative approach with queue-based processing (no recursion)."""
+        if root_data is None:
+            return
+        
+        # Use queue for iterative processing - (parent_element, data)
+        build_queue = deque([(root_element, root_data)])
+        element_count = 0
+        max_elements = 10000  # Configurable limit for memory safety
+        
+        while build_queue and element_count < max_elements:
+            parent_element, data = build_queue.popleft()
+            element_count += 1
+            
+            if data is None:
+                continue
+            
+            if isinstance(data, dict):
+                # Process attributes first
+                for k, v in data.items():
+                    if isinstance(k, str) and k.startswith('@'):
+                        attr_name = k[1:]
+                        if v is not None:
+                            parent_element.set(attr_name, str(v))
+                
+                # Handle text content for complex types with simple content
+                if '_text' in data:
+                    parent_element.text = str(data['_text'])
+                
+                # Process elements - queue them for processing instead of recursing
+                for k, v in data.items():
+                    if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
+                        
+                        # Determine qualified name
+                        qname = self._determine_qname(k)
+                        
+                        # Create elements and queue their processing
+                        if isinstance(v, list):
+                            for item in v:
+                                child_element = etree.SubElement(parent_element, qname)
+                                if isinstance(item, dict):
+                                    # Queue for iterative processing
+                                    build_queue.append((child_element, item))
+                                else:
+                                    # Handle non-dict items directly
+                                    if item is not None and str(item).strip():
+                                        child_element.text = str(item)
+                                    else:
+                                        fallback_value = self._generate_fallback_for_empty_element(k, qname)
+                                        child_element.text = fallback_value
+                        else:
+                            child_element = etree.SubElement(parent_element, qname)
+                            if isinstance(v, dict):
+                                # Queue for iterative processing
+                                build_queue.append((child_element, v))
+                            else:
+                                # Handle non-dict values directly
+                                if v is not None and str(v).strip():
+                                    child_element.text = str(v)
+                                else:
+                                    fallback_value = self._generate_fallback_for_empty_element(k, qname)
+                                    child_element.text = fallback_value
+            else:
+                parent_element.text = str(data)
+    
+    def _determine_qname(self, element_name: str):
+        """Determine qualified name for an element."""
+        if ':' in element_name:
+            ns_prefix, local_name = element_name.split(':', 1)
+            ns_uri = self.schema.namespaces.get(ns_prefix)
+            return etree.QName(ns_uri, local_name) if ns_uri else element_name
+        else:
+            ns_uri = self.schema.target_namespace
+            return etree.QName(ns_uri, element_name) if ns_uri else element_name
+    
+    def _generate_fallback_for_empty_element(self, element_name: str, qname) -> str:
+        """Generate appropriate fallback value for empty elements based on name patterns."""
+        element_lower = element_name.lower()
+        
+        # First try enumeration-specific fallbacks for common IATA patterns
+        enumeration_patterns = {
+            'iata_locationcode': 'LAX',
+            'airlinedesigcode': 'AA',
+            'cabintypecode': 'Y',
+            'cabintypename': 'Economy',
+            'currencycode': 'USD',
+            'countrycode': 'US',
+            'bagrulecode': 'Y',
+            'bagdisclosurerulecode': 'D',
+            'actioncode': 'Add',
+            'statuscode': 'OK',
+            'weightunitofmeasurement': 'KGM',
+            'lengthunitofmeasurement': 'CMT',
+            'appliedexempt': 'Applied',
+            'disclosure': 'D',
+            'taxonomycode': 'ABC',
+            'codeset': 'ABC',
+            'typename': 'Father Surname',
+            'name': 'Father Surname',
+        }
+        
+        # Check for enumeration patterns first
+        for pattern, value in enumeration_patterns.items():
+            if pattern in element_lower:
+                return value
+        
+        # Generic enumeration patterns
+        if any(keyword in element_lower for keyword in ['code', 'type', 'status']):
+            # Special cases for known enumeration patterns
+            if 'applied' in element_lower or 'exempt' in element_lower:
+                return 'Applied'
+            elif 'disclosure' in element_lower:
+                return 'D'
+            elif 'action' in element_lower:
+                return 'Add'
+            elif 'currency' in element_lower:
+                return 'USD'
+            elif 'country' in element_lower:
+                return 'US'
+            elif 'cabin' in element_lower:
+                return 'Y'
+            elif 'airline' in element_lower:
+                return 'AA'
+            else:
+                return 'ABC'  # Generic code fallback
+        
+        # Amount and price related elements
+        if any(keyword in element_lower for keyword in ['amount', 'price', 'cost', 'fee', 'rate', 'fare']):
+            return '99.99'
+        
+        # Percentage and measurement elements
+        if any(keyword in element_lower for keyword in ['percent', 'ratio', 'measure']):
+            return '10.0'
+        
+        # Boolean-like elements
+        if any(keyword in element_lower for keyword in ['ind', 'flag', 'enable', 'allow']):
+            return 'true'
+        
+        # Numeric elements
+        if any(keyword in element_lower for keyword in ['number', 'count', 'quantity', 'sequence']):
+            return '123'
+        
+        # Date/time elements
+        if any(keyword in element_lower for keyword in ['date', 'time']):
+            return '2024-06-08T12:00:00Z'
+        
+        # Text and description elements
+        if any(keyword in element_lower for keyword in ['text', 'name', 'description', 'title']):
+            return 'SampleText'
+        
+        # Default fallback
+        return 'DefaultValue'
     
     def _dict_to_xml(self, element_name: str, data: Union[Dict[str, Any], str, int, float, bool, None], namespace_prefix: str = '') -> str:
         """Convert a dictionary to XML string (fallback method)."""
@@ -624,13 +1210,13 @@ class XMLGenerator:
             elif namespace_prefix:
                 attrs_str = namespace_prefix
             
+            # Handle text content for complex types with simple content
+            text_content = data.get('_text', '')
+            
             # Build child elements
             children = []
             for k, v in data.items():
                 if isinstance(k, str) and not k.startswith('@') and not k.startswith('_'):
-                    comment_key = f"_comment_{k}"
-                    if comment_key in data:
-                        children.append(f'<!-- {data[comment_key]} -->')
                     
                     if isinstance(v, list):
                         for item in v:
@@ -638,10 +1224,11 @@ class XMLGenerator:
                     else:
                         children.append(self._dict_to_xml(k, v))
             
-            if not children:
+            if not children and not text_content:
                 return f'<{element_name}{" " + attrs_str if attrs_str else ""}></{element_name}>'
             
             children_str = ''.join(children)
-            return f'<{element_name}{" " + attrs_str if attrs_str else ""}>{children_str}</{element_name}>'
+            content = str(text_content) + children_str if text_content else children_str
+            return f'<{element_name}{" " + attrs_str if attrs_str else ""}>{content}</{element_name}>'
         else:
             return f'<{element_name}>{data}</{element_name}>'

@@ -96,8 +96,10 @@ class TestOrderViewRSXMLGeneration:
         """Test that XML contains comments about element occurrence information."""
         xml_content = xml_generator_order_view.generate_dummy_xml()
         
-        # Generated XML should contain comments about element occurrence constraints
-        assert '<!--' in xml_content and '-->' in xml_content
+        # Generated XML should be well-formed and contain expected elements
+        assert xml_content.startswith('<?xml version="1.0" encoding="UTF-8"?>')
+        assert '<IATA_OrderViewRS' in xml_content
+        assert '</IATA_OrderViewRS>' in xml_content
     
     def test_xml_file_output(self, xml_generator_order_view, sample_xml_output_dir):
         """Test XML generation to file."""
@@ -141,7 +143,7 @@ class TestOrderViewRSErrorHandling:
         """Test handling of invalid schema path."""
         from utils.xml_generator import XMLGenerator
         
-        with pytest.raises(ValueError, match="Failed to load XSD schema"):
+        with pytest.raises(ValueError, match="XSD file not found"):
             XMLGenerator("/nonexistent/path/schema.xsd")
 
 

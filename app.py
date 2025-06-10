@@ -1,3 +1,30 @@
+"""
+XML Chunker - Main Streamlit Application
+
+This is the main entry point for the XML Chunker application, a modular Streamlit 
+interface for parsing XSD schemas and generating compliant dummy XML files.
+
+The application specializes in IATA NDC (New Distribution Capability) XSD schemas, 
+providing advanced analysis, choice element handling, and validation-aware XML generation.
+
+Key Features:
+- Interactive XSD file upload with dependency resolution
+- Real-time schema analysis with tree visualization
+- Choice element selection and unbounded element configuration
+- Type-aware XML generation with validation compliance
+- Comprehensive error categorization and reporting
+
+Architecture:
+This module serves as the presentation layer, orchestrating the following services:
+- FileManager: File operations and temporary directory management
+- XMLValidator: XML validation against XSD schemas with detailed error reporting
+- SchemaAnalyzer: XSD schema analysis and structure extraction
+- XMLGenerator: Universal XML generation engine
+
+Author: XML Chunker Development Team
+License: MIT
+"""
+
 import streamlit as st
 import io
 import os
@@ -5,9 +32,19 @@ import tempfile
 from utils.xml_generator import XMLGenerator
 from utils.xsd_parser import XSDParser
 from streamlit_tree_select import tree_select
+from config import get_config
+from services.file_manager import FileManager
+from services.xml_validator import XMLValidator
+from services.schema_analyzer import SchemaAnalyzer
+
+# Initialize configuration and services
+config = get_config()
+file_manager = FileManager(config)
+xml_validator = XMLValidator(config)
+schema_analyzer = SchemaAnalyzer(config)
 
 st.set_page_config(
-    page_title="XML Chunker",
+    page_title=config.ui.default_page_title,
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -119,42 +156,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name):
-    """
-    Set up temporary directory with XSD dependencies.
-    
-    Args:
-        xsd_file_path: Path to the XSD file
-        xsd_file_name: Original name of the XSD file
-    """
-    try:
-        resource_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resource', '21_3_5_distribution_schemas')
-        
-        if not os.path.exists(resource_dir):
-            print(f"Warning: Resource directory not found: {resource_dir}")
-            return
-            
-        temp_dir = os.path.dirname(xsd_file_path)
-        if not os.path.exists(temp_dir):
-            print(f"Warning: Temp directory not found: {temp_dir}")
-            return
-        
-        for filename in os.listdir(resource_dir):
-            if filename.endswith('.xsd') and filename != xsd_file_name:
-                try:
-                    src_path = os.path.join(resource_dir, filename)
-                    dst_path = os.path.join(temp_dir, filename)
-                    
-                    if os.path.exists(src_path) and os.path.isfile(src_path):
-                        with open(src_path, 'rb') as src_file:
-                            with open(dst_path, 'wb') as dst_file:
-                                dst_file.write(src_file.read())
-                except Exception as e:
-                    print(f"Warning: Could not copy {filename}: {e}")
-                    
-    except Exception as e:
-        print(f"Warning: Error setting up dependencies: {e}")
-
 def analyze_xsd_schema(xsd_file_path):
     """
     Analyze XSD schema to extract choice elements and structure.
@@ -165,283 +166,7 @@ def analyze_xsd_schema(xsd_file_path):
     Returns:
         Dictionary containing schema analysis
     """
-    try:
-        parser = XSDParser(xsd_file_path)
-        schema_info = parser.get_schema_info()
-        root_elements = parser.get_root_elements()
-        
-        # Get detailed element structure including unbounded elements
-        choices = []
-        unbounded_elements = []
-        element_tree = {}
-        
-        if parser.schema:
-            for element_name, element in parser.schema.elements.items():
-                if element.type and element.type.is_complex():
-                    tree_data = extract_element_tree(element, element_name)
-                    element_tree[element_name] = tree_data
-                    
-                    element_choices = extract_choice_elements(element)
-                    if element_choices:
-                        choices.extend(element_choices)
-                    
-                    # Find unbounded elements
-                    unbounded = find_unbounded_elements(element)
-                    unbounded_elements.extend(unbounded)
-        
-        return {
-            'schema_info': schema_info,
-            'root_elements': root_elements,
-            'choices': choices,
-            'unbounded_elements': unbounded_elements,
-            'element_tree': element_tree,
-            'success': True
-        }
-    except Exception as e:
-        return {
-            'error': str(e),
-            'success': False
-        }
-
-def extract_element_tree(element, element_name, level=0, processed_types=None):
-    """
-    Extract element tree structure for display with improved depth and None handling.
-    
-    Args:
-        element: XSD element
-        element_name: Name of the element
-        level: Nesting level for indentation
-        processed_types: Set to track processed types and prevent circular references
-        
-    Returns:
-        Dictionary containing tree structure
-    """
-    # Initialize processed types set if not provided
-    if processed_types is None:
-        processed_types = set()
-    
-    # CRITICAL: Prevent circular references
-    if element and hasattr(element, 'type') and element.type:
-        type_key = f"{element_name}_{str(element.type)}"
-        if type_key in processed_types:
-            return {
-                'name': element_name,
-                'level': level,
-                'children': [],
-                'is_choice': False,
-                'choice_options': [],
-                'is_unbounded': False,
-                'occurs': {'min': 1, 'max': '1'},
-                '_circular_ref': f'Circular reference: {element_name}'
-            }
-        processed_types.add(type_key)
-    
-    # CRITICAL: Prevent stack overflow with strict depth limit
-    if level > 5:  # Reduced from 6 to 5
-        return {
-            'name': element_name,
-            'level': level,
-            'children': [],
-            'is_choice': False,
-            'choice_options': [],
-            'is_unbounded': False,
-            'occurs': {'min': 1, 'max': '1'},
-            '_depth_limit': 'Maximum depth reached'
-        }
-    
-    # Safely get occurrence values with proper None handling
-    min_occurs = getattr(element, 'min_occurs', 1) or 1
-    max_occurs = getattr(element, 'max_occurs', 1)
-    
-    # Format max_occurs to avoid showing None
-    if max_occurs is None:
-        max_display = "unbounded"
-        is_unbounded = True
-    elif max_occurs > 1:
-        max_display = str(max_occurs)
-        is_unbounded = True
-    else:
-        max_display = "1"
-        is_unbounded = False
-    
-    tree_data = {
-        'name': element_name,
-        'level': level,
-        'children': [],
-        'is_choice': False,
-        'choice_options': [],
-        'is_unbounded': is_unbounded,
-        'occurs': {'min': min_occurs, 'max': max_display}
-    }
-    
-    try:
-        # Only process complex types that have content
-        if (hasattr(element, 'type') and element.type and 
-            element.type.is_complex() and 
-            hasattr(element.type, 'content') and element.type.content and 
-            level < 4):  # Further reduced from 6 to 4
-            
-            choice_found = False
-            
-            try:
-                # Check for choice constructs first
-                for item in element.type.content.iter_components():
-                    if hasattr(item, 'model') and item.model == 'choice':
-                        tree_data['is_choice'] = True
-                        choice_found = True
-                        # Safely iterate choice elements
-                        try:
-                            for choice_item in item.iter_elements():
-                                choice_min = getattr(choice_item, 'min_occurs', 1) or 1
-                                choice_max = getattr(choice_item, 'max_occurs', 1)
-                                choice_max_display = "unbounded" if choice_max is None else str(choice_max)
-                                
-                                tree_data['choice_options'].append({
-                                    'name': choice_item.local_name or 'UnknownChoice',
-                                    'min_occurs': choice_min,
-                                    'max_occurs': choice_max_display
-                                })
-                        except AttributeError:
-                            # Skip items that don't support iter_elements
-                            pass
-            except AttributeError:
-                # iter_components not available
-                pass
-            
-            try:
-                # Process regular elements safely
-                for item in element.type.content.iter_elements():
-                    if (hasattr(item, 'local_name') and item.local_name and 
-                        hasattr(item, 'type') and item.type):
-                        child_tree = extract_element_tree(item, item.local_name, level + 1, processed_types)
-                        if child_tree and child_tree.get('name'):  # Only add valid trees
-                            tree_data['children'].append(child_tree)
-            except AttributeError:
-                # iter_elements not available, try alternative approach
-                try:
-                    # For some schema types, use direct iteration
-                    if hasattr(element.type.content, '_group'):
-                        for group_item in element.type.content._group:
-                            if hasattr(group_item, 'local_name') and group_item.local_name:
-                                child_tree = extract_element_tree(group_item, group_item.local_name, level + 1, processed_types)
-                                if child_tree and child_tree.get('name'):
-                                    tree_data['children'].append(child_tree)
-                except:
-                    pass
-                        
-            # Special handling for IATA schemas - detect Error/Response pattern
-            if not choice_found and element_name and 'OrderViewRS' in element_name:
-                child_names = [child['name'] for child in tree_data['children']]
-                if 'Error' in child_names and 'Response' in child_names:
-                    tree_data['is_choice'] = True
-                    tree_data['choice_options'] = [
-                        {'name': 'Error', 'min_occurs': 1, 'max_occurs': 'unbounded'},
-                        {'name': 'Response', 'min_occurs': 1, 'max_occurs': '1'}
-                    ]
-        
-        # Handle simple types - just show type info
-        elif hasattr(element, 'type') and element.type and element.type.is_simple():
-            tree_data['_type_info'] = f"Simple type: {element.type.local_name or str(element.type)}"
-                    
-    except Exception as e:
-        # More specific error handling
-        error_msg = str(e)
-        if "iter_elements" in error_msg:
-            tree_data['_error'] = "Simple type element (no children)"
-        elif "iter_components" in error_msg:
-            tree_data['_error'] = "Complex type without accessible components"
-        else:
-            tree_data['_error'] = f"Error extracting tree: {error_msg}"
-    
-    return tree_data
-
-def extract_choice_elements(element, depth=0):
-    """
-    Extract choice elements from XSD element with enhanced information.
-    
-    Args:
-        element: XSD element
-        depth: Current recursion depth
-        
-    Returns:
-        List of choice information
-    """
-    # Prevent infinite recursion
-    if depth > 3:
-        return []
-        
-    choices = []
-    try:
-        if hasattr(element.type, 'content') and element.type.content:
-            for item in element.type.content.iter_components():
-                if hasattr(item, 'model') and item.model == 'choice':
-                    choice_info = {
-                        'type': 'choice',
-                        'min_occurs': getattr(item, 'min_occurs', 1),
-                        'max_occurs': getattr(item, 'max_occurs', 1),
-                        'elements': [],
-                        'path': getattr(element, 'local_name', 'root')
-                    }
-                    
-                    for choice_item in item.iter_elements():
-                        choice_info['elements'].append({
-                            'name': choice_item.local_name,
-                            'type': str(choice_item.type) if choice_item.type else 'unknown',
-                            'min_occurs': choice_item.min_occurs,
-                            'max_occurs': choice_item.max_occurs
-                        })
-                    
-                    if choice_info['elements']:
-                        choices.append(choice_info)
-                        
-                # Also check for direct elements that might be choice-like
-                elif hasattr(item, 'local_name'):
-                    if hasattr(item, 'type') and item.type and item.type.is_complex():
-                        sub_choices = extract_choice_elements(item, depth + 1)
-                        choices.extend(sub_choices)
-    except Exception:
-        pass
-    
-    return choices
-
-def find_unbounded_elements(element, path=""):
-    """
-    Find elements with maxOccurs="unbounded".
-    
-    Args:
-        element: XSD element
-        path: Current path in the schema
-        
-    Returns:
-        List of unbounded elements
-    """
-    unbounded = []
-    current_path = f"{path}.{element.local_name}" if path else element.local_name
-    
-    try:
-        # Check if current element is unbounded
-        if hasattr(element, 'max_occurs') and (element.max_occurs is None or element.max_occurs > 1):
-            max_val = "unbounded" if element.max_occurs is None else element.max_occurs
-            unbounded.append({
-                'name': element.local_name,
-                'path': current_path,
-                'max_occurs': max_val
-            })
-        
-        # Check children
-        if hasattr(element.type, 'content') and element.type.content:
-            for item in element.type.content.iter_elements():
-                if hasattr(item, 'max_occurs') and (item.max_occurs is None or item.max_occurs > 1):
-                    max_val = "unbounded" if item.max_occurs is None else item.max_occurs
-                    unbounded.append({
-                        'name': item.local_name,
-                        'path': f"{current_path}.{item.local_name}",
-                        'max_occurs': max_val
-                    })
-    except Exception:
-        pass
-    
-    return unbounded
+    return schema_analyzer.analyze_xsd_schema(xsd_file_path)
 
 def convert_tree_to_streamlit_format(node, parent_path=""):
     """
@@ -528,6 +253,33 @@ def convert_tree_to_streamlit_format(node, parent_path=""):
     
     return tree_node
 
+def format_validation_error(error):
+    """
+    Format a validation error for display.
+    
+    Args:
+        error: xmlschema validation error object
+        
+    Returns:
+        Dictionary with formatted error information
+    """
+    return xml_validator.format_validation_error(error)
+
+def validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name=None, uploaded_file_content=None):
+    """
+    Validate generated XML against the XSD schema.
+    
+    Args:
+        xml_content: XML content to validate
+        xsd_file_path: Path to the XSD schema file (may not exist)
+        uploaded_file_name: Original uploaded file name
+        uploaded_file_content: Original uploaded file content
+        
+    Returns:
+        Dictionary containing validation results
+    """
+    return xml_validator.validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name, uploaded_file_content)
+
 def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, unbounded_counts=None):
     """
     Generate XML from XSD schema with user-specified choices.
@@ -542,7 +294,7 @@ def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, u
         Generated XML content
     """
     try:
-        setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name)
+        file_manager.setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name)
         generator = XMLGenerator(xsd_file_path)
         
         # Pass user selections to generator if available
@@ -575,7 +327,7 @@ def main():
             temp_file.write(uploaded_file.getvalue())
         
         # Set up dependencies for schema analysis
-        setup_temp_directory_with_dependencies(temp_file_path, file_name)
+        file_manager.setup_temp_directory_with_dependencies(temp_file_path, file_name)
         
         col1, col2 = st.columns(2)
         
@@ -685,8 +437,8 @@ def main():
                                 count = st.number_input(
                                     f"{elem['name']} (max: {max_display}):",
                                     min_value=1,
-                                    max_value=10 if elem['max_occurs'] == 'unbounded' else min(10, int(elem['max_occurs'])),
-                                    value=2,
+                                    max_value=config.elements.max_unbounded_count if elem['max_occurs'] == 'unbounded' else min(config.elements.max_unbounded_count, int(elem['max_occurs'])),
+                                    value=config.elements.default_element_count,
                                     key=f"count_{elem['path']}",
                                     help=f"Number of {elem['name']} elements to generate"
                                 )
@@ -701,14 +453,13 @@ def main():
                     st.session_state['selected_choices'] = {}
                     st.session_state['unbounded_counts'] = {}
         
-        # XML Generation Section (below both columns)
+        # XML Generation Section (below both columns) - Full width
         st.markdown("---")
         st.markdown('<div class="sub-header">XML Generation:</div>', unsafe_allow_html=True)
         
-        col_gen1, col_gen2, col_gen3 = st.columns([1, 2, 1])
-        
-        with col_gen2:
-            # Show current selections summary
+        # Show current selections summary in a centered column
+        col_summary1, col_summary2, col_summary3 = st.columns([1, 2, 1])
+        with col_summary2:
             if 'selected_choices' in st.session_state and st.session_state['selected_choices']:
                 st.caption("**Selected Choices:**")
                 for choice_key, choice_data in st.session_state['selected_choices'].items():
@@ -719,30 +470,168 @@ def main():
                 for path, count in st.session_state['unbounded_counts'].items():
                     element_name = path.split('.')[-1]
                     st.caption(f"• {element_name}: {count}")
+        
+        # Action buttons in centered columns
+        col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns([1, 1, 1, 1, 1])
+        
+        with col_btn3:
+            generate_clicked = st.button("🚀 Generate XML", key="generate_xml_btn", help="Generate XML based on your selections")
+        
+        # Handle XML generation
+        if generate_clicked:
+            with st.spinner("Generating XML with your selections..."):
+                # Get user selections from session state
+                selected_choices = st.session_state.get('selected_choices', {})
+                unbounded_counts = st.session_state.get('unbounded_counts', {})
+                
+                xml_content = generate_xml_from_xsd(
+                    temp_file_path, 
+                    file_name, 
+                    selected_choices, 
+                    unbounded_counts
+                )
+                
+                # Store XML content and file info in session state for validation
+                st.session_state['generated_xml'] = xml_content
+                st.session_state['temp_file_path'] = temp_file_path
+                st.session_state['uploaded_file_name'] = file_name
+                st.session_state['uploaded_file_content'] = file_content
+        
+        # Display generated XML and validation controls if XML exists
+        if 'generated_xml' in st.session_state and st.session_state['generated_xml']:
+            st.markdown('<div class="sub-header">Generated XML:</div>', unsafe_allow_html=True)
             
-            if st.button("🚀 Generate XML", key="generate_xml_btn", help="Generate XML based on your selections"):
-                with st.spinner("Generating XML with your selections..."):
-                    # Get user selections from session state
-                    selected_choices = st.session_state.get('selected_choices', {})
-                    unbounded_counts = st.session_state.get('unbounded_counts', {})
-                    
-                    xml_content = generate_xml_from_xsd(
-                        temp_file_path, 
-                        file_name, 
-                        selected_choices, 
-                        unbounded_counts
+            # Display XML in a larger area (full width)
+            st.code(st.session_state['generated_xml'], language="xml", height=600)
+            
+            # Action buttons row - Download and Validate
+            col_action1, col_action2, col_action3, col_action4, col_action5 = st.columns([1, 1, 1, 1, 1])
+            
+            with col_action2:
+                st.download_button(
+                    label="💾 Download XML",
+                    data=st.session_state['generated_xml'],
+                    file_name=f"{file_name.replace('.xsd', '')}_generated.xml",
+                    mime="application/xml"
+                )
+            
+            with col_action4:
+                validate_clicked = st.button("✅ Validate XML", key="validate_xml_btn", help="Validate generated XML against XSD schema")
+            
+            # Handle validation
+            if validate_clicked:
+                with st.spinner("Validating XML against schema..."):
+                    validation_result = validate_xml_against_schema(
+                        st.session_state['generated_xml'], 
+                        st.session_state['temp_file_path'],
+                        st.session_state.get('uploaded_file_name'),
+                        st.session_state.get('uploaded_file_content')
                     )
                     
-                    st.markdown('<div class="sub-header">Generated XML:</div>', unsafe_allow_html=True)
-                    st.code(xml_content, language="xml")
-                    
-                    # Option to download the generated XML
-                    st.download_button(
-                        label="💾 Download XML",
-                        data=xml_content,
-                        file_name=f"{file_name.replace('.xsd', '')}_generated.xml",
-                        mime="application/xml"
-                    )
+                    if validation_result['success']:
+                        error_breakdown = validation_result['error_breakdown']
+                        total_errors = validation_result['total_errors']
+                        
+                        # Display validation results
+                        st.markdown("### 📊 Validation Results")
+                        
+                        if validation_result['is_valid']:
+                            st.success("🎉 **XML is valid!** No validation errors found.")
+                        else:
+                            if total_errors == 0:
+                                st.success("🎉 **XML is valid!** No validation errors found.")
+                            else:
+                                st.warning(f"⚠️ **XML has validation issues** ({total_errors} total errors)")
+                        
+                        # Show error breakdown
+                        if total_errors > 0:
+                            col_val1, col_val2, col_val3, col_val4 = st.columns(4)
+                            
+                            with col_val1:
+                                st.metric("Enumeration Errors", error_breakdown['enumeration_errors'], help="Values not in allowed enumeration lists")
+                            
+                            with col_val2:
+                                st.metric("Boolean Errors", error_breakdown['boolean_errors'], help="Invalid boolean values")
+                            
+                            with col_val3:
+                                st.metric("Pattern Errors", error_breakdown['pattern_errors'], help="Values not matching required patterns")
+                            
+                            with col_val4:
+                                st.metric("Structural Errors", error_breakdown['structural_errors'], help="Missing required elements or invalid structure")
+                            
+                            # Show categorized errors
+                            if validation_result.get('categorized_errors'):
+                                st.markdown("#### 📋 Detailed Error Analysis")
+                                
+                                categorized_errors = validation_result['categorized_errors']
+                                
+                                # Create tabs for each error type
+                                tab_names = []
+                                tab_contents = []
+                                
+                                if categorized_errors['enumeration_errors']:
+                                    tab_names.append(f"🔤 Enumeration ({len(categorized_errors['enumeration_errors'])})")
+                                    tab_contents.append(('enumeration_errors', categorized_errors['enumeration_errors']))
+                                
+                                if categorized_errors['boolean_errors']:
+                                    tab_names.append(f"✅ Boolean ({len(categorized_errors['boolean_errors'])})")
+                                    tab_contents.append(('boolean_errors', categorized_errors['boolean_errors']))
+                                
+                                if categorized_errors['pattern_errors']:
+                                    tab_names.append(f"🎯 Pattern ({len(categorized_errors['pattern_errors'])})")
+                                    tab_contents.append(('pattern_errors', categorized_errors['pattern_errors']))
+                                
+                                if categorized_errors['structural_errors']:
+                                    tab_names.append(f"🏗️ Structural ({len(categorized_errors['structural_errors'])})")
+                                    tab_contents.append(('structural_errors', categorized_errors['structural_errors']))
+                                
+                                if tab_names:
+                                    tabs = st.tabs(tab_names)
+                                    
+                                    for i, (tab, (error_type, errors)) in enumerate(zip(tabs, tab_contents)):
+                                        with tab:
+                                            if error_type == 'enumeration_errors':
+                                                st.markdown("**Enumeration Violations:**")
+                                                st.caption("Values that don't match allowed enumeration lists. Expected for dummy data.")
+                                            elif error_type == 'boolean_errors':
+                                                st.markdown("**Boolean Type Errors:**")
+                                                st.caption("Invalid boolean values. These indicate type generation issues.")
+                                            elif error_type == 'pattern_errors':
+                                                st.markdown("**Pattern Violations:**")
+                                                st.caption("Values that don't match required regex patterns. Expected for dummy data.")
+                                            elif error_type == 'structural_errors':
+                                                st.markdown("**Structural Issues:**")
+                                                st.caption("Missing required elements or invalid XML structure. These should be minimal.")
+                                            
+                                            # Display errors in a nice format
+                                            for j, error in enumerate(errors, 1):
+                                                formatted_error = format_validation_error(error)
+                                                
+                                                with st.expander(f"Error {j}: {formatted_error['element_name']}", expanded=False):
+                                                    st.text(f"📍 Path: {formatted_error['path']}")
+                                                    st.text(f"💬 Message: {formatted_error['message']}")
+                                                    if formatted_error['line']:
+                                                        st.text(f"📍 Line: {formatted_error['line']}")
+                                                
+                                                # Show only first 10 errors per category to avoid overwhelming UI
+                                                if j >= 10 and len(errors) > 10:
+                                                    st.info(f"... and {len(errors) - 10} more {error_type.replace('_', ' ')} errors")
+                                                    break
+                        
+                        # Provide helpful tips
+                        if total_errors > 0:
+                            st.info("""
+💡 **Understanding Validation Errors:**
+
+• **Enumeration errors** are expected for dummy data - real values would need to match specific lists
+• **Boolean errors** indicate type generation issues (being actively improved)
+• **Pattern errors** are expected for dummy data - real values would need specific formats  
+• **Structural errors** indicate missing required elements or wrong XML structure (should be minimal)
+
+The XML structure is correct even with data constraint violations.
+                            """)
+                    else:
+                        st.error(f"❌ **Validation failed:** {validation_result['error']}")
         
         # Cleanup temp directory
         try:

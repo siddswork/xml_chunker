@@ -75,11 +75,12 @@ class TestChoiceElementExtraction:
     
     def test_extract_choice_elements_order_view_rs(self, xml_generator_order_view):
         """Test choice element extraction from OrderViewRS schema."""
-        from app import extract_choice_elements
+        from services.schema_analyzer import SchemaAnalyzer
         
+        schema_analyzer = SchemaAnalyzer()
         # Get the root element from the schema
         root_element = list(xml_generator_order_view.schema.elements.values())[0]
-        choices = extract_choice_elements(root_element)
+        choices = schema_analyzer.extract_choice_elements(root_element)
         
         assert len(choices) > 0
         
@@ -96,10 +97,11 @@ class TestChoiceElementExtraction:
     
     def test_extract_choice_elements_with_occurrences(self, xml_generator_order_view):
         """Test that choice elements include occurrence information."""
-        from app import extract_choice_elements
+        from services.schema_analyzer import SchemaAnalyzer
         
+        schema_analyzer = SchemaAnalyzer()
         root_element = list(xml_generator_order_view.schema.elements.values())[0]
-        choices = extract_choice_elements(root_element)
+        choices = schema_analyzer.extract_choice_elements(root_element)
         
         for choice in choices:
             assert 'min_occurs' in choice
@@ -117,10 +119,11 @@ class TestUnboundedElementDetection:
     
     def test_find_unbounded_elements_order_view_rs(self, xml_generator_order_view):
         """Test finding unbounded elements in OrderViewRS."""
-        from app import find_unbounded_elements
+        from services.schema_analyzer import SchemaAnalyzer
+        schema_analyzer = SchemaAnalyzer()
         
         root_element = list(xml_generator_order_view.schema.elements.values())[0]
-        unbounded = find_unbounded_elements(root_element)
+        unbounded = schema_analyzer.find_unbounded_elements(root_element)
         
         assert len(unbounded) > 0
         
@@ -138,10 +141,11 @@ class TestUnboundedElementDetection:
     
     def test_find_unbounded_elements_with_paths(self, xml_generator_order_view):
         """Test that unbounded elements have correct path information."""
-        from app import find_unbounded_elements
+        from services.schema_analyzer import SchemaAnalyzer
+        schema_analyzer = SchemaAnalyzer()
         
         root_element = list(xml_generator_order_view.schema.elements.values())[0]
-        unbounded = find_unbounded_elements(root_element)
+        unbounded = schema_analyzer.find_unbounded_elements(root_element)
         
         for elem in unbounded:
             # Path should contain element hierarchy
@@ -155,10 +159,11 @@ class TestElementTreeExtraction:
     
     def test_extract_element_tree_structure(self, xml_generator_order_view):
         """Test element tree extraction structure."""
-        from app import extract_element_tree
+        from services.schema_analyzer import SchemaAnalyzer
+        schema_analyzer = SchemaAnalyzer()
         
         root_element = list(xml_generator_order_view.schema.elements.values())[0]
-        tree = extract_element_tree(root_element, "IATA_OrderViewRS")
+        tree = schema_analyzer.extract_element_tree(root_element, "IATA_OrderViewRS")
         
         # Check tree structure
         assert tree['name'] == 'IATA_OrderViewRS'
@@ -179,13 +184,16 @@ class TestElementTreeExtraction:
     
     def test_extract_element_tree_depth_limit(self, xml_generator_order_view):
         """Test that tree extraction respects depth limits."""
-        from app import extract_element_tree
+        from services.schema_analyzer import SchemaAnalyzer
+        schema_analyzer = SchemaAnalyzer()
         
         root_element = list(xml_generator_order_view.schema.elements.values())[0]
-        tree = extract_element_tree(root_element, "IATA_OrderViewRS", level=0)
+        tree = schema_analyzer.extract_element_tree(root_element, "IATA_OrderViewRS", level=0)
         
-        # Should not go deeper than 3 levels
-        def check_max_level(node, max_level=3):
+        # Should not go deeper than configured tree depth
+        from config import get_config
+        config = get_config()
+        def check_max_level(node, max_level=config.ui.default_tree_depth):
             assert node['level'] <= max_level
             for child in node['children']:
                 check_max_level(child, max_level)
@@ -271,7 +279,9 @@ class TestAppHelperFunctions:
     
     def test_setup_temp_directory_with_dependencies(self, temp_xsd_dir):
         """Test temporary directory setup with XSD dependencies."""
-        from app import setup_temp_directory_with_dependencies
+        from services.file_manager import FileManager
+        
+        file_manager = FileManager()
         
         # Create a separate temp directory to test dependency copying
         test_temp_dir = tempfile.mkdtemp()
@@ -282,7 +292,7 @@ class TestAppHelperFunctions:
             f.write('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"/>')
         
         try:
-            setup_temp_directory_with_dependencies(test_xsd_path, "test.xsd")
+            file_manager.setup_temp_directory_with_dependencies(test_xsd_path, "test.xsd")
             
             # Should copy dependency files to the temp directory
             common_types_path = os.path.join(test_temp_dir, "IATA_OffersAndOrdersCommonTypes.xsd")
@@ -291,9 +301,9 @@ class TestAppHelperFunctions:
         finally:
             shutil.rmtree(test_temp_dir, ignore_errors=True)
     
-    def test_display_tree_node_structure(self):
-        """Test tree node display structure (unit test for data structure)."""
-        from app import display_tree_node
+    def test_convert_tree_to_streamlit_format(self):
+        """Test tree node conversion to streamlit format."""
+        from app import convert_tree_to_streamlit_format
         
         # Create a mock tree node
         mock_node = {
@@ -308,15 +318,12 @@ class TestAppHelperFunctions:
             'occurs': {'min': 1, 'max': 1}
         }
         
-        # This function writes to streamlit, so we can't easily test output
-        # But we can test that it doesn't crash with valid input
-        try:
-            # In a real test environment, this would need streamlit context
-            # For now, just test that the function exists and accepts the right parameters
-            assert callable(display_tree_node)
-        except Exception:
-            # Expected to fail outside of streamlit context
-            pass
+        # Test the conversion function that actually exists
+        result = convert_tree_to_streamlit_format(mock_node)
+        assert 'value' in result
+        assert 'label' in result
+        assert result['value'] == 'TestElement'
+        assert 'TestElement' in result['label']
 
 
 class TestGenerateXMLFromXSDFunction:
