@@ -408,6 +408,265 @@ class XMLGenerator:
         else:
             return self.config.elements.default_element_count  # Default from config
     
+    def _get_sequence_ordered_elements(self, element_type) -> List[xmlschema.validators.XsdElement]:
+        """Get elements in their XSD sequence order for proper XML generation."""
+        if not hasattr(element_type, 'content') or element_type.content is None:
+            return []
+        
+        ordered_elements = []
+        content = element_type.content
+        
+        try:
+            # Check if this is a sequence model
+            if hasattr(content, 'model') and str(content.model) == 'sequence':
+                # For sequence models, elements must be in schema-defined order
+                # Use the actual _group ordering for proper sequence
+                if hasattr(content, '_group') and content._group:
+                    # Process groups in their defined order
+                    for group_item in content._group:
+                        if hasattr(group_item, 'iter_elements'):
+                            # This is a nested group - process its elements
+                            for child in group_item.iter_elements():
+                                ordered_elements.append(child)
+                        elif hasattr(group_item, 'local_name'):
+                            # This is a direct element reference
+                            ordered_elements.append(group_item)
+                        elif hasattr(group_item, '_group'):
+                            # Nested group within group
+                            for nested_item in group_item._group:
+                                if hasattr(nested_item, 'local_name'):
+                                    ordered_elements.append(nested_item)
+                else:
+                    # Standard sequence processing using the internal order
+                    for child in content.iter_elements():
+                        ordered_elements.append(child)
+            else:
+                # For non-sequence models, use iterator order
+                for child in content.iter_elements():
+                    ordered_elements.append(child)
+        except AttributeError:
+            # Fallback if iter_elements is not available
+            pass
+        
+        return ordered_elements
+    
+    def _ensure_required_elements(self, element, result: Dict[str, Any], current_path: str, depth: int) -> None:
+        """Ensure all required elements with minOccurs > 0 are present."""
+        if not hasattr(element.type, 'content') or element.type.content is None:
+            return
+            
+        try:
+            for child in element.type.content.iter_elements():
+                child_name = self._format_element_name(child)
+                
+                # Check if element is required (minOccurs > 0) and not already present
+                min_occurs = getattr(child, 'min_occurs', 1) or 0
+                if min_occurs > 0 and child_name not in result:
+                    # This is a required element that's missing - add it
+                    if child.max_occurs is None or child.max_occurs > 1:
+                        count = max(min_occurs, self._get_element_count(child_name, child, depth))
+                        safe_count = min(count, max(1, 5 - depth))
+                        result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                    else:
+                        result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
+        except AttributeError:
+            pass
+
+    def _process_sequence_elements(self, element, result: Dict[str, Any], current_path: str, depth: int) -> None:
+        """Process elements in strict sequence order to comply with XSD sequence constraints."""
+        if not hasattr(element.type, 'content') or element.type.content is None:
+            return
+            
+        content = element.type.content
+        
+        # CRITICAL: For sequence models, we must process elements in EXACT order with NO gaps
+        if hasattr(content, 'model') and str(content.model) == 'sequence':
+            if hasattr(content, '_group') and content._group:
+                # Process ALL elements in their exact schema sequence order
+                for group_item in content._group:
+                    # CRITICAL: Handle choice groups specially - select only ONE element
+                    if hasattr(group_item, 'model') and str(group_item.model) == 'choice':
+                        # This is a choice group - select only one element
+                        choice_elements = list(group_item.iter_elements()) if hasattr(group_item, 'iter_elements') else []
+                        selected_choice = self._select_choice_element(choice_elements, current_path)
+                        
+                        if selected_choice:
+                            child_name = self._format_element_name(selected_choice)
+                            
+                            # Skip if already processed (avoid duplicates)
+                            if child_name not in result:
+                                # Generate the selected choice element
+                                if selected_choice.max_occurs is None or selected_choice.max_occurs > 1:
+                                    count = self._get_element_count(child_name, selected_choice, depth)
+                                    safe_count = min(count, max(1, 5 - depth))
+                                    result[child_name] = [self._create_element_dict(selected_choice, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                                else:
+                                    result[child_name] = self._create_element_dict(selected_choice, f"{current_path}.{child_name}", depth + 1)
+                    
+                    elif 'Any' in type(group_item).__name__:
+                        # This is an xs:any element - handle specially
+                        self._handle_any_element(group_item, result, current_path, depth)
+                    
+                    elif hasattr(group_item, 'local_name') and hasattr(group_item, 'type'):
+                        # This is a direct element (not a group)
+                        child = group_item
+                        child_name = self._format_element_name(child)
+                        
+                        # Skip if already processed (avoid duplicates)
+                        if child_name in result:
+                            continue
+                        
+                        # Special handling for AugmentationPoint elements
+                        if child_name == 'AugmentationPoint':
+                            # Check if it's required
+                            min_occurs = getattr(child, 'min_occurs', 1) or 0
+                            if min_occurs == 0:
+                                # Skip optional AugmentationPoint elements as they are problematic
+                                continue
+                            else:
+                                # Handle required AugmentationPoint with xs:any content
+                                self._handle_augmentation_point_element(child, result, current_path, depth)
+                                continue
+                        
+                        # Check if this is required element
+                        min_occurs = getattr(child, 'min_occurs', 1) or 0
+                        
+                        # Process elements in strict sequence order - only required elements + selective optional
+                        if min_occurs > 0:
+                            # Required element - must include
+                            if child.max_occurs is None or child.max_occurs > 1:
+                                count = max(min_occurs, self._get_element_count(child_name, child, depth))
+                                safe_count = min(count, max(1, 5 - depth))
+                                result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                            else:
+                                result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
+                        elif depth < 2:  # Only very shallow optional elements to avoid bloat
+                            if child.max_occurs is None or child.max_occurs > 1:
+                                count = self._get_element_count(child_name, child, depth)
+                                safe_count = min(count, 1)  # Limit to 1 for optional
+                                result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                            else:
+                                result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
+                    
+                    elif hasattr(group_item, 'iter_elements') and not hasattr(group_item, 'model'):
+                        # This is a nested group (not choice) - process its elements
+                        for nested_child in group_item.iter_elements():
+                            # CRITICAL: Only process actual elements, not groups
+                            if hasattr(nested_child, 'local_name') and hasattr(nested_child, 'type'):
+                                child_name = self._format_element_name(nested_child)
+                                
+                                # Skip if already processed (avoid duplicates)
+                                if child_name in result:
+                                    continue
+                                
+                                # Check if this is required element
+                                min_occurs = getattr(nested_child, 'min_occurs', 1) or 0
+                                
+                                # Process nested elements in sequence order
+                                if min_occurs > 0:
+                                    # Required element - must include
+                                    if nested_child.max_occurs is None or nested_child.max_occurs > 1:
+                                        count = max(min_occurs, self._get_element_count(child_name, nested_child, depth))
+                                        safe_count = min(count, max(1, 5 - depth))
+                                        result[child_name] = [self._create_element_dict(nested_child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                                    else:
+                                        result[child_name] = self._create_element_dict(nested_child, f"{current_path}.{child_name}", depth + 1)
+                                elif depth < 2:  # Only very shallow optional elements
+                                    if nested_child.max_occurs is None or nested_child.max_occurs > 1:
+                                        count = self._get_element_count(child_name, nested_child, depth)
+                                        safe_count = min(count, 1)  # Limit to 1 for optional
+                                        result[child_name] = [self._create_element_dict(nested_child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                                    else:
+                                        result[child_name] = self._create_element_dict(nested_child, f"{current_path}.{child_name}", depth + 1)
+                return
+        
+        # Fallback to old method for non-sequence or when _group is not available
+        # Get elements in proper sequence order
+        ordered_elements = self._get_sequence_ordered_elements(element.type)
+        
+        # Process choice elements first (if any)
+        choice_elements = self._get_choice_elements(element)
+        processed_choice_elements = set()
+        
+        if choice_elements and len(choice_elements) > 1:
+            # This is a choice construct - select one element
+            selected_element = self._select_choice_element(choice_elements, current_path)
+            if selected_element:
+                child_name = self._format_element_name(selected_element)
+                
+                if selected_element.max_occurs is None or selected_element.max_occurs > 1:
+                    count = self._get_element_count(child_name, selected_element, depth)
+                    safe_count = min(count, max(1, self.config.recursion.max_tree_depth - depth))
+                    result[child_name] = [self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                else:
+                    result[child_name] = self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1)
+                
+                # Mark choice elements as processed
+                processed_choice_elements.update(choice_elements)
+        
+        # Process remaining elements in sequence order
+        for child in ordered_elements:
+            if child in processed_choice_elements:
+                continue  # Skip already processed choice elements
+                
+            child_name = self._format_element_name(child)
+            
+            # Skip if already processed (avoid duplicates)
+            if child_name in result:
+                continue
+            
+            if child.max_occurs is None or child.max_occurs > 1:
+                count = self._get_element_count(child_name, child, depth)
+                safe_count = min(count, max(1, 5 - depth))
+                result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+            else:
+                result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
+        
+        # Ensure all required elements are present
+        self._ensure_required_elements(element, result, current_path, depth)
+
+    def _is_complex_type_with_simple_content(self, element) -> bool:
+        """Check if element is a complex type with simple content (like MeasureType)."""
+        if not element or not element.type:
+            return False
+        
+        # Check if this is a complex type
+        if not element.type.is_complex():
+            return False
+        
+        # Check if it has simple content
+        return (hasattr(element.type, 'content') and 
+                element.type.content and 
+                hasattr(element.type.content, 'is_simple') and 
+                element.type.content.is_simple())
+    
+    def _handle_complex_simple_content(self, element, result: Dict[str, Any]) -> Any:
+        """Handle complex types with simple content properly."""
+        if not self._is_complex_type_with_simple_content(element):
+            return result
+        
+        # Generate the base value for simple content
+        base_value = self._generate_value_for_type(element.type.content, element.local_name)
+        
+        # CRITICAL: Ensure complex simple content never has empty values
+        if base_value is None or base_value == "":
+            # Apply same fallback logic as for simple types
+            element_lower = element.local_name.lower()
+            if any(keyword in element_lower for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
+                base_value = "99.99"  # Use string for XML text content
+            elif any(keyword in element_lower for keyword in ['count', 'number', 'quantity']):
+                base_value = "1"
+            elif any(keyword in element_lower for keyword in ['code', 'type', 'status']):
+                base_value = "ABC"
+            else:
+                base_value = "SampleValue"
+        
+        if result:  # Has attributes
+            result['_text'] = str(base_value)  # Ensure it's a string
+            return result
+        else:  # No attributes, just return the value
+            return str(base_value)
+
     def _get_namespace_prefix(self, namespace: str) -> Optional[str]:
         """Get the prefix for a given namespace."""
         if not namespace:
@@ -519,6 +778,96 @@ class XMLGenerator:
         # Default: select first element
         return choice_elements[0]
     
+    def _process_content_elements(self, element, result: Dict[str, Any], current_path: str, depth: int) -> None:
+        """Enhanced content processing that handles all content models with proper choice selection."""
+        content = element.type.content
+        
+        # Check content model type and process accordingly
+        if hasattr(content, 'model'):
+            model_str = str(content.model)
+            
+            if model_str == 'sequence':
+                # Use existing sequence processing
+                self._process_sequence_elements(element, result, current_path, depth)
+            elif model_str == 'choice':
+                # This entire content is a choice - select only one element
+                choice_elements = list(content.iter_elements()) if hasattr(content, 'iter_elements') else []
+                selected_choice = self._select_choice_element(choice_elements, current_path)
+                
+                if selected_choice:
+                    child_name = self._format_element_name(selected_choice)
+                    if selected_choice.max_occurs is None or selected_choice.max_occurs > 1:
+                        count = self._get_element_count(child_name, selected_choice, depth)
+                        safe_count = min(count, max(1, 5 - depth))
+                        result[child_name] = [self._create_element_dict(selected_choice, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                    else:
+                        result[child_name] = self._create_element_dict(selected_choice, f"{current_path}.{child_name}", depth + 1)
+            else:
+                # For other content models (all, group, etc.), check for nested choices
+                self._process_content_with_choice_handling(element, result, current_path, depth)
+        else:
+            # No specific model - check for choices in the content
+            self._process_content_with_choice_handling(element, result, current_path, depth)
+    
+    def _process_content_with_choice_handling(self, element, result: Dict[str, Any], current_path: str, depth: int) -> None:
+        """Process content with choice detection and handling."""
+        content = element.type.content
+        
+        # Check if this content contains choice groups
+        choice_groups = []
+        regular_elements = []
+        
+        if hasattr(content, '_group') and content._group:
+            for group_item in content._group:
+                if hasattr(group_item, 'model') and str(group_item.model) == 'choice':
+                    choice_groups.append(group_item)
+                elif hasattr(group_item, 'local_name') and hasattr(group_item, 'type'):
+                    regular_elements.append(group_item)
+                elif hasattr(group_item, 'iter_elements'):
+                    # Nested group - add all its elements as regular elements
+                    for nested_element in group_item.iter_elements():
+                        if hasattr(nested_element, 'local_name') and hasattr(nested_element, 'type'):
+                            regular_elements.append(nested_element)
+        elif hasattr(content, 'iter_elements'):
+            # Direct iteration fallback
+            for child in content.iter_elements():
+                regular_elements.append(child)
+        
+        # Process choice groups - select only one element from each
+        for choice_group in choice_groups:
+            choice_elements = list(choice_group.iter_elements()) if hasattr(choice_group, 'iter_elements') else []
+            selected_choice = self._select_choice_element(choice_elements, current_path)
+            
+            if selected_choice:
+                child_name = self._format_element_name(selected_choice)
+                # Skip if already processed
+                if child_name not in result:
+                    if selected_choice.max_occurs is None or selected_choice.max_occurs > 1:
+                        count = self._get_element_count(child_name, selected_choice, depth)
+                        safe_count = min(count, max(1, 5 - depth))
+                        result[child_name] = [self._create_element_dict(selected_choice, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                    else:
+                        result[child_name] = self._create_element_dict(selected_choice, f"{current_path}.{child_name}", depth + 1)
+        
+        # Process regular elements
+        for child in regular_elements:
+            child_name = self._format_element_name(child)
+            
+            # Skip if already processed
+            if child_name in result:
+                continue
+            
+            # Check if required
+            min_occurs = getattr(child, 'min_occurs', 1) or 0
+            
+            if min_occurs > 0 or depth < 2:  # Required elements or shallow optional
+                if child.max_occurs is None or child.max_occurs > 1:
+                    count = self._get_element_count(child_name, child, depth)
+                    safe_count = min(count, max(1, 5 - depth))
+                    result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
+                else:
+                    result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
+    
     def _create_element_dict(self, element: xmlschema.validators.XsdElement, path: str = "", depth: int = 0) -> Dict[str, Any]:
         """
         Universally create a dictionary representation of any XSD element with deep recursive parsing.
@@ -535,6 +884,12 @@ class XMLGenerator:
         if depth > self.config.recursion.max_element_depth:
             return {"_recursion_limit": "Maximum depth reached"}
         
+        # CRITICAL: Check if this is actually an element and not a group
+        if not hasattr(element, 'type') or not hasattr(element, 'local_name'):
+            print(f"WARNING: Received non-element object at path '{path}': {type(element)}")
+            print(f"Object details: {dir(element)[:10]}...")  # Show first 10 attributes
+            return {"_invalid_element": f"Received non-element object: {type(element)}"}
+        
         # CRITICAL: Aggressive circular reference protection
         # Include path to make type_key unique per instance location
         type_key = f"{path}_{element.local_name}_{str(element.type)}"
@@ -548,7 +903,9 @@ class XMLGenerator:
         self.processed_types.add(type_key)
         
         try:
-            result = {}
+            # CRITICAL: Use OrderedDict to preserve exact element sequence order
+            from collections import OrderedDict
+            result = OrderedDict()
             current_path = f"{path}.{element.local_name}" if path else element.local_name
             
             # Handle null type
@@ -588,65 +945,40 @@ class XMLGenerator:
                         if attr.type is not None:
                             result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name)
                 
-                # Handle complex types with simple content (like MeasureType)
-                # These have attributes AND a simple base type as content
-                if (hasattr(element.type, 'content') and element.type.content and 
-                    hasattr(element.type.content, 'is_simple') and element.type.content.is_simple()):
-                    # This is a complex type with simple content - generate the base value
-                    base_value = self._generate_value_for_type(element.type.content, element.local_name)
+                # CRITICAL: Special handling for Amount-like elements (complex type with decimal content + attributes)
+                if (element.local_name == 'Amount' or 
+                    (hasattr(element.type, 'attributes') and 'CurCode' in element.type.attributes)):
+                    
+                    # Force handling as complex simple content for Amount elements
+                    base_value = self._generate_value_for_type(element.type.content if hasattr(element.type, 'content') else None, element.local_name)
+                    
+                    # Apply fallback if base_value is empty
+                    if base_value is None or base_value == "":
+                        base_value = "99.99"  # Default decimal value for Amount
+                    
                     if result:  # Has attributes
-                        result['_text'] = base_value
+                        result['_text'] = str(base_value)
                         return result
                     else:  # No attributes, just return the value
-                        return base_value
+                        return str(base_value)
                 
-                # Process content
+                # Handle complex types with simple content (like MeasureType)
+                # These have attributes AND a simple base type as content
+                is_complex_simple = self._is_complex_type_with_simple_content(element)
+                if is_complex_simple:
+                    complex_simple_result = self._handle_complex_simple_content(element, result)
+                    return complex_simple_result
+                
+                # Process content using sequence-aware processing
                 if hasattr(element.type, 'content') and element.type.content is not None:
-                    # Handle choice constructs
-                    choice_elements = self._get_choice_elements(element)
-                    if choice_elements and len(choice_elements) > 1:
-                        # This is a choice construct - select one element
-                        selected_element = self._select_choice_element(choice_elements, current_path)
-                        if selected_element:
-                            child_name = self._format_element_name(selected_element)
-                            
-                            if selected_element.max_occurs is None or selected_element.max_occurs > 1:
-                                count = self._get_element_count(child_name, selected_element, depth)
-                                # CRITICAL: Limit count based on depth to prevent memory explosion
-                                safe_count = min(count, max(1, self.config.recursion.max_tree_depth - depth))  # Reduce count based on config
-                                result[child_name] = [self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
-                            else:
-                                result[child_name] = self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1)
-                        
-                        # Process non-choice elements (sequence elements after the choice)
+                    try:
+                        # Use enhanced content processing that handles all content models
+                        self._process_content_elements(element, result, current_path, depth)
+                    except AttributeError:
+                        # Fallback to old method if new method fails
                         try:
-                            for child in element.type.content.iter_elements():
-                                if child not in choice_elements:
-                                    child_name = self._format_element_name(child)
-                                    
-                                    if child.max_occurs is None or child.max_occurs > 1:
-                                        count = self._get_element_count(child_name, child, depth)
-                                        # CRITICAL: Limit count based on depth to prevent memory explosion
-                                        safe_count = min(count, max(1, 5 - depth))  # Exponentially reduce count
-                                        result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
-                                    else:
-                                        result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
-                        except AttributeError:
-                            # Handle cases where content doesn't have iter_elements (simple types)
-                            pass
-                    else:
-                        # No choice construct - process all elements normally
-                        try:
-                            for child in element.type.content.iter_elements():
-                                child_name = self._format_element_name(child)
-                                
-                                if child.max_occurs is None or child.max_occurs > 1:
-                                    count = self._get_element_count(child_name, child, depth)
-                                    # CRITICAL: Limit count based on depth to prevent memory explosion
-                                    safe_count = min(count, max(1, 5 - depth))  # Exponentially reduce count
-                                    result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
-                                else:
-                                    result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
+                            # CRITICAL: Apply choice logic even in fallback to prevent multiple choice elements
+                            self._process_content_with_choice_handling(element, result, current_path, depth)
                         except AttributeError:
                             # Handle cases where content doesn't have iter_elements (simple types)
                             pass
@@ -768,10 +1100,124 @@ class XMLGenerator:
     
     def _queue_child_elements_iterative(self, element, current_path: str, depth: int, 
                                        parent_dict: Dict, element_queue: deque):
-        """Queue child elements for iterative processing."""
+        """Queue child elements for iterative processing using sequence order."""
         try:
-            # Handle choice constructs
+            content = element.type.content
+            
+            # For sequence models, process elements in exact _group order
+            if hasattr(content, 'model') and str(content.model) == 'sequence':
+                if hasattr(content, '_group') and content._group:
+                    # Process elements in their exact schema sequence order
+                    for group_item in content._group:
+                        # CRITICAL: Handle choice groups specially - select only ONE element
+                        if hasattr(group_item, 'model') and str(group_item.model) == 'choice':
+                            # This is a choice group - select only one element
+                            choice_elements = list(group_item.iter_elements()) if hasattr(group_item, 'iter_elements') else []
+                            selected_choice = self._select_choice_element(choice_elements, current_path)
+                            
+                            if selected_choice:
+                                child_name = self._format_element_name(selected_choice)
+                                new_path = f"{current_path}.{child_name}" if current_path else child_name
+                                
+                                # Skip if already processed (avoid duplicates)
+                                if child_name not in parent_dict:
+                                    # Generate the selected choice element
+                                    if selected_choice.max_occurs is None or selected_choice.max_occurs > 1:
+                                        count = self._get_element_count(child_name, selected_choice, depth)
+                                        safe_count = min(count, max(1, 5 - depth))
+                                        parent_dict[child_name] = []
+                                        for i in range(safe_count):
+                                            list_path = f"{new_path}[{i}]"
+                                            element_queue.append((selected_choice, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                                            parent_dict[child_name].append({})
+                                    else:
+                                        element_queue.append((selected_choice, new_path, depth + 1, parent_dict, child_name))
+                        
+                        elif hasattr(group_item, 'local_name') and hasattr(group_item, 'type'):
+                            child = group_item
+                            child_name = self._format_element_name(child)
+                            new_path = f"{current_path}.{child_name}" if current_path else child_name
+                            
+                            # Skip if already processed (avoid duplicates)
+                            if child_name in parent_dict:
+                                continue
+                            
+                            # Check if this is required element
+                            min_occurs = getattr(child, 'min_occurs', 1) or 0
+                            
+                            # CRITICAL: For sequence compliance, include all elements
+                            if min_occurs > 0:
+                                # Required element
+                                if child.max_occurs is None or child.max_occurs > 1:
+                                    count = max(min_occurs, self._get_element_count(child_name, child, depth))
+                                    safe_count = min(count, max(1, 5 - depth))
+                                    parent_dict[child_name] = []
+                                    for i in range(safe_count):
+                                        list_path = f"{new_path}[{i}]"
+                                        element_queue.append((child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                                        parent_dict[child_name].append({})
+                                else:
+                                    element_queue.append((child, new_path, depth + 1, parent_dict, child_name))
+                            elif depth < 2:  # Only very shallow optional elements to avoid bloat
+                                if child.max_occurs is None or child.max_occurs > 1:
+                                    count = self._get_element_count(child_name, child, depth)
+                                    safe_count = min(count, 1)  # Limit to 1 for optional
+                                    parent_dict[child_name] = []
+                                    for i in range(safe_count):
+                                        list_path = f"{new_path}[{i}]"
+                                        element_queue.append((child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                                        parent_dict[child_name].append({})
+                                else:
+                                    element_queue.append((child, new_path, depth + 1, parent_dict, child_name))
+                        elif hasattr(group_item, 'iter_elements') and not hasattr(group_item, 'model'):
+                            # This is a nested group (not choice) - process its elements
+                            for nested_child in group_item.iter_elements():
+                                # CRITICAL: Only process actual elements, not groups
+                                if hasattr(nested_child, 'local_name') and hasattr(nested_child, 'type'):
+                                    child_name = self._format_element_name(nested_child)
+                                    new_path = f"{current_path}.{child_name}" if current_path else child_name
+                                    
+                                    # Skip if already processed (avoid duplicates)
+                                    if child_name in parent_dict:
+                                        continue
+                                    
+                                    # Check if this is required element
+                                    min_occurs = getattr(nested_child, 'min_occurs', 1) or 0
+                                    
+                                    # CRITICAL: For sequence compliance, include all elements
+                                    if min_occurs > 0:
+                                        # Required element
+                                        if nested_child.max_occurs is None or nested_child.max_occurs > 1:
+                                            count = max(min_occurs, self._get_element_count(child_name, nested_child, depth))
+                                            safe_count = min(count, max(1, 5 - depth))
+                                            parent_dict[child_name] = []
+                                            for i in range(safe_count):
+                                                list_path = f"{new_path}[{i}]"
+                                                element_queue.append((nested_child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                                                parent_dict[child_name].append({})
+                                        else:
+                                            element_queue.append((nested_child, new_path, depth + 1, parent_dict, child_name))
+                                    elif depth < 2:  # Only very shallow optional elements
+                                        if nested_child.max_occurs is None or nested_child.max_occurs > 1:
+                                            count = self._get_element_count(child_name, nested_child, depth)
+                                            safe_count = min(count, 1)  # Limit to 1 for optional
+                                            parent_dict[child_name] = []
+                                            for i in range(safe_count):
+                                                list_path = f"{new_path}[{i}]"
+                                                element_queue.append((nested_child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                                                parent_dict[child_name].append({})
+                                        else:
+                                            element_queue.append((nested_child, new_path, depth + 1, parent_dict, child_name))
+                    return
+            
+            # Fallback to old method for non-sequence or when _group is not available
+            # Get elements in proper sequence order
+            ordered_elements = self._get_sequence_ordered_elements(element.type)
+            
+            # Handle choice constructs first
             choice_elements = self._get_choice_elements(element)
+            processed_choice_elements = set()
+            
             if choice_elements and len(choice_elements) > 1:
                 # This is a choice construct - select one element
                 selected_element = self._select_choice_element(choice_elements, current_path)
@@ -791,38 +1237,31 @@ class XMLGenerator:
                     else:
                         element_queue.append((selected_element, new_path, depth + 1, parent_dict, child_name))
                 
-                # Process non-choice elements (sequence elements after the choice)
-                for child in element.type.content.iter_elements():
-                    if child not in choice_elements:
-                        child_name = self._format_element_name(child)
-                        new_path = f"{current_path}.{child_name}" if current_path else child_name
-                        
-                        if child.max_occurs is None or child.max_occurs > 1:
-                            count = self._get_element_count(child_name, child, depth)
-                            safe_count = min(count, max(1, 5 - depth))
-                            parent_dict[child_name] = []
-                            for i in range(safe_count):
-                                list_path = f"{new_path}[{i}]"
-                                element_queue.append((child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
-                                parent_dict[child_name].append({})
-                        else:
-                            element_queue.append((child, new_path, depth + 1, parent_dict, child_name))
-            else:
-                # No choice construct - process all elements normally
-                for child in element.type.content.iter_elements():
-                    child_name = self._format_element_name(child)
-                    new_path = f"{current_path}.{child_name}" if current_path else child_name
+                # Mark choice elements as processed
+                processed_choice_elements.update(choice_elements)
+            
+            # Process remaining elements in sequence order
+            for child in ordered_elements:
+                if child in processed_choice_elements:
+                    continue  # Skip already processed choice elements
                     
-                    if child.max_occurs is None or child.max_occurs > 1:
-                        count = self._get_element_count(child_name, child, depth)
-                        safe_count = min(count, max(1, 5 - depth))
-                        parent_dict[child_name] = []
-                        for i in range(safe_count):
-                            list_path = f"{new_path}[{i}]"
-                            element_queue.append((child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
-                            parent_dict[child_name].append({})
-                    else:
-                        element_queue.append((child, new_path, depth + 1, parent_dict, child_name))
+                child_name = self._format_element_name(child)
+                new_path = f"{current_path}.{child_name}" if current_path else child_name
+                
+                # Skip if already processed (avoid duplicates)
+                if child_name in parent_dict:
+                    continue
+                
+                if child.max_occurs is None or child.max_occurs > 1:
+                    count = self._get_element_count(child_name, child, depth)
+                    safe_count = min(count, max(1, 5 - depth))
+                    parent_dict[child_name] = []
+                    for i in range(safe_count):
+                        list_path = f"{new_path}[{i}]"
+                        element_queue.append((child, list_path, depth + 1, parent_dict[child_name], len(parent_dict[child_name])))
+                        parent_dict[child_name].append({})
+                else:
+                    element_queue.append((child, new_path, depth + 1, parent_dict, child_name))
         except AttributeError:
             # Handle cases where content doesn't have iter_elements
             pass
@@ -1232,3 +1671,104 @@ class XMLGenerator:
             return f'<{element_name}{" " + attrs_str if attrs_str else ""}>{content}</{element_name}>'
         else:
             return f'<{element_name}>{data}</{element_name}>'
+    
+    def _handle_any_element(self, any_element, result: Dict[str, Any], current_path: str, depth: int) -> None:
+        """Handle xs:any elements by generating appropriate content."""
+        try:
+            # Check if this xs:any element is required
+            min_occurs = getattr(any_element, 'min_occurs', 1) or 0
+            max_occurs = getattr(any_element, 'max_occurs', 1)
+            
+            # Skip if not required (min_occurs = 0) to avoid validation issues
+            if min_occurs == 0:
+                return
+            
+            # For required xs:any elements, we need to generate content
+            # Check namespace constraints
+            namespace_constraint = getattr(any_element, 'namespace', None)
+            process_contents = getattr(any_element, 'process_contents', 'strict')
+            
+            # Generate sample content based on namespace constraints
+            if namespace_constraint == '##other':
+                # Must be from a different namespace - generate generic content
+                self._generate_other_namespace_content(result, min_occurs, max_occurs, depth)
+            elif namespace_constraint == '##any':
+                # Can be from any namespace - generate generic content
+                self._generate_any_namespace_content(result, min_occurs, max_occurs, depth)
+            else:
+                # Specific namespace constraint - skip to avoid issues
+                pass
+                
+        except Exception as e:
+            # Silently handle any issues with xs:any processing
+            pass
+    
+    def _handle_augmentation_point_element(self, element, result: Dict[str, Any], current_path: str, depth: int) -> None:
+        """Handle AugmentationPoint elements specially."""
+        # AugmentationPoint elements are optional extension points that typically contain xs:any
+        # Since they're usually minOccurs="0", we can safely skip them
+        child_name = self._format_element_name(element)
+        min_occurs = getattr(element, 'min_occurs', 1) or 0
+        
+        if min_occurs == 0:
+            # Skip optional AugmentationPoint to avoid validation issues
+            return
+        
+        # For required AugmentationPoint (rare), try to handle the xs:any content
+        if hasattr(element, 'type') and element.type:
+            # Check if the type contains xs:any elements
+            if self._type_contains_any_elements(element.type):
+                # Generate minimal valid content for the xs:any requirements
+                result[child_name] = self._generate_augmentation_point_content(element)
+            else:
+                # Regular processing for non-xs:any AugmentationPoint
+                result[child_name] = self._create_element_dict(element, f"{current_path}.{child_name}", depth + 1)
+    
+    def _type_contains_any_elements(self, element_type) -> bool:
+        """Check if a type contains xs:any elements."""
+        try:
+            if hasattr(element_type, '_group') and element_type._group:
+                return self._group_contains_any_elements(element_type._group)
+            elif hasattr(element_type, 'content_type') and hasattr(element_type.content_type, '_group'):
+                return self._group_contains_any_elements(element_type.content_type._group)
+            return False
+        except:
+            return False
+    
+    def _group_contains_any_elements(self, group) -> bool:
+        """Check if a group contains xs:any elements."""
+        try:
+            if hasattr(group, '__iter__'):
+                for item in group:
+                    if 'Any' in type(item).__name__:
+                        return True
+                    # Recurse into nested groups
+                    if hasattr(item, '_group') and self._group_contains_any_elements(item._group):
+                        return True
+                    elif hasattr(item, 'type') and hasattr(item.type, '_group') and self._group_contains_any_elements(item.type._group):
+                        return True
+            return False
+        except:
+            return False
+    
+    def _generate_augmentation_point_content(self, element) -> Dict[str, Any]:
+        """Generate minimal content for AugmentationPoint with xs:any."""
+        # For AugmentationPoint with xs:any namespace="##other", 
+        # we would need elements from a different namespace
+        # Since this is complex and error-prone, return empty dict
+        # This will create an empty element which might still cause validation issues
+        # but is better than invalid namespace content
+        return {}
+    
+    def _generate_other_namespace_content(self, result: Dict[str, Any], min_occurs: int, max_occurs, depth: int) -> None:
+        """Generate content for xs:any with namespace='##other'."""
+        # For namespace="##other", we need elements from a different namespace
+        # This is complex to implement correctly, so we skip generation
+        # to avoid validation errors
+        pass
+    
+    def _generate_any_namespace_content(self, result: Dict[str, Any], min_occurs: int, max_occurs, depth: int) -> None:
+        """Generate content for xs:any with namespace='##any'."""
+        # For namespace="##any", we can generate generic elements
+        # But this is still risky, so we skip to avoid validation issues
+        pass
