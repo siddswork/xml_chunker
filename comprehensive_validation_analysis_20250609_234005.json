@@ -1,0 +1,176 @@
+{
+  "metadata": {
+    "analysis_date": "2025-06-09T23:40:05.729595",
+    "xml_file_size": 747855,
+    "total_errors": 1447,
+    "schema_file": "resource/21_3_5_distribution_schemas/IATA_OrderViewRS.xsd"
+  },
+  "error_summary": {
+    "pattern_validation": 1000,
+    "enumeration_mismatch": 84,
+    "length_constraint": 104,
+    "unexpected_element": 18,
+    "type_mismatch": 241
+  },
+  "detailed_analysis": {
+    "pattern_validation": {
+      "pattern_breakdown": {
+        "unknown": 996,
+        "[\\\\i-[:]][\\\\c-[:]]*": 4
+      },
+      "top_patterns": [
+        [
+          "unknown",
+          996
+        ],
+        [
+          "[\\\\i-[:]][\\\\c-[:]]*",
+          4
+        ]
+      ],
+      "sample_errors": [
+        {
+          "pattern": "unknown",
+          "element_path": "/IATA_OrderViewRS/Response/cns:DataLists/cns:DatedOperatingLegList/cns:DatedOperatingLeg[1]/cns:OnGroundDuration",
+          "full_error": "failed decoding 'SampleOnGroundDuration' with XsdAtomicBuiltin(name='xs:duration'):\n\nReason: 'SampleOnGroundDuration' is not an xs:duration value\n\nSchema component:\n\n  <xs:simpleType xmlns:hfp=\"http://www.w3.org/2001/XMLSchema-hasFacetAndProperty\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" name=\"du..."
+        },
+        {
+          "pattern": "unknown",
+          "element_path": "/IATA_OrderViewRS/Response/cns:DataLists/cns:DatedOperatingLegList/cns:DatedOperatingLeg[2]/cns:OnGroundDuration",
+          "full_error": "failed decoding 'SampleOnGroundDuration' with XsdAtomicBuiltin(name='xs:duration'):\n\nReason: 'SampleOnGroundDuration' is not an xs:duration value\n\nSchema component:\n\n  <xs:simpleType xmlns:hfp=\"http://www.w3.org/2001/XMLSchema-hasFacetAndProperty\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" name=\"du..."
+        },
+        {
+          "pattern": "unknown",
+          "element_path": "/IATA_OrderViewRS/Response/cns:DataLists/cns:DatedOperatingSegmentList/cns:DatedOperatingSegment[1]/cns:Duration",
+          "full_error": "failed decoding 'SampleDuration' with XsdAtomicBuiltin(name='xs:duration'):\n\nReason: 'SampleDuration' is not an xs:duration value\n\nSchema component:\n\n  <xs:simpleType xmlns:hfp=\"http://www.w3.org/2001/XMLSchema-hasFacetAndProperty\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" name=\"duration\" id=\"dura..."
+        }
+      ]
+    },
+    "enumeration_mismatch": {
+      "sample_errors": [
+        {
+          "full_error": "failed validating '' with XsdEnumerationFacets(['Applied', 'Exempt']):\n\nReason: value must be one of ['Applied', 'Exempt']\n\nSchema component:\n\n  <xs:enumeration xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" value=\"Applied\">\n  <xs:annotation>\n  <xs:documentation>Applied</xs:documentation>\n  </xs:annota..."
+        },
+        {
+          "full_error": "failed validating '' with XsdEnumerationFacets(['Applied', 'Exempt']):\n\nReason: value must be one of ['Applied', 'Exempt']\n\nSchema component:\n\n  <xs:enumeration xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" value=\"Applied\">\n  <xs:annotation>\n  <xs:documentation>Applied</xs:documentation>\n  </xs:annota..."
+        },
+        {
+          "full_error": "failed validating '' with XsdEnumerationFacets(['Exclude', 'Preferred', 'Required']):\n\nReason: value must be one of ['Exclude', 'Preferred', 'Required']\n\nSchema component:\n\n  <xs:enumeration xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" value=\"Exclude\">\n  <xs:annotation>\n  <xs:documentation>Exclude</x..."
+        }
+      ]
+    },
+    "length_constraint": {
+      "sample_errors": [
+        {
+          "full_error": "failed validating '' with XsdLengthFacet(value=3, fixed=False):\n\nReason: length has to be 3\n\nSchema component:\n\n  <xs:length xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" value=\"3\" />\n\nInstance type: <class 'xml.etree.ElementTree.Element'>\n\nInstance:\n\n  <cns:IATA_LocationCode xmlns:cns=\"http://www.iat..."
+        },
+        {
+          "full_error": "failed validating '' with XsdMinLengthFacet(value=1, fixed=False):\n\nReason: value length cannot be lesser than 1\n\nSchema component:\n\n  <xs:minLength xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" value=\"1\" />\n\nInstance type: <class 'xml.etree.ElementTree.Element'>\n\nInstance:\n\n  <cns:StationName xmlns:c..."
+        },
+        {
+          "full_error": "failed validating '' with XsdLengthFacet(value=3, fixed=False):\n\nReason: length has to be 3\n\nSchema component:\n\n  <xs:length xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" value=\"3\" />\n\nInstance type: <class 'xml.etree.ElementTree.Element'>\n\nInstance:\n\n  <cns:IATA_LocationCode xmlns:cns=\"http://www.iat..."
+        }
+      ]
+    },
+    "unexpected_element": {
+      "sample_errors": [
+        {
+          "full_error": "failed validating <Element '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersMessage}AugmentationPoint' at 0x74ba0c160ef0> with XsdGroup(model='sequence', occurs=[1, 1]):\n\nReason: Unexpected child with tag 'cns:None' at position 1.\n\nSchema component:\n\n  <xs:complexType xmlns:xs=\"http://www..."
+        },
+        {
+          "full_error": "failed validating <Element '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersMessage}AugmentationPoint' at 0x74ba0c160ef0> with XsdGroup(model='sequence', occurs=[1, 1]):\n\nReason: Unexpected child with tag 'cns:None' at position 2.\n\nSchema component:\n\n  <xs:complexType xmlns:xs=\"http://www..."
+        },
+        {
+          "full_error": "failed validating <Element '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes}SignatureType' at 0x74ba0c1449f0> with XsdGroup(model='sequence', occurs=[1, 1]):\n\nReason: Unexpected child with tag '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersMessage}SignedInfo' at p..."
+        }
+      ]
+    },
+    "type_mismatch": {
+      "sample_errors": [
+        {
+          "full_error": "failed validating <Element '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes}Station' at 0x74ba0b90a610> with XsdGroup(model='sequence', occurs=[1, 1]):\n\nReason: The content of element 'cns:Station' is not complete. Tag '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrde..."
+        },
+        {
+          "full_error": "failed validating <Element '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes}Station' at 0x74ba0b90b3d0> with XsdGroup(model='sequence', occurs=[1, 1]):\n\nReason: The content of element 'cns:Station' is not complete. Tag '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrde..."
+        },
+        {
+          "full_error": "failed validating <Element '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAndOrdersCommonTypes}PrefLevel' at 0x74ba0b944590> with XsdGroup(model='sequence', occurs=[1, 1]):\n\nReason: The content of element 'cns:PrefLevel' is not complete. Tag '{http://www.iata.org/IATA/2015/EASD/00/IATA_OffersAnd..."
+        }
+      ]
+    }
+  },
+  "fix_strategies": {
+    "pattern_validation": {
+      "difficulty": "EASY",
+      "confidence": "HIGH",
+      "strategy": "Enhance StringTypeGenerator pattern matching with specific generators for each pattern",
+      "implementation": [
+        "Map each pattern to a specific value generator function",
+        "Add pattern validation in string generator validate_constraints method",
+        "Create pattern-specific value generators (flight numbers, codes, etc.)",
+        "Test against each pattern regex to ensure compliance"
+      ],
+      "estimated_fix_rate": "95%",
+      "dependencies": "None - self-contained fix"
+    },
+    "enumeration_mismatch": {
+      "difficulty": "EASY",
+      "confidence": "HIGH",
+      "strategy": "Verify enumeration value extraction and selection",
+      "implementation": [
+        "Debug enumeration constraint extraction",
+        "Ensure EnumerationTypeGenerator receives valid enum values",
+        "Add fallback for invalid/missing enumeration values",
+        "Test enumeration value selection and rotation"
+      ],
+      "estimated_fix_rate": "90%",
+      "dependencies": "Enumeration support already implemented"
+    },
+    "length_constraint": {
+      "difficulty": "EASY",
+      "confidence": "HIGH",
+      "strategy": "Investigate and fix length_constraint issues",
+      "estimated_fix_rate": "90%",
+      "dependencies": "Requires detailed investigation"
+    },
+    "unexpected_element": {
+      "difficulty": "HARD",
+      "confidence": "LOW",
+      "strategy": "Investigate and fix unexpected_element issues",
+      "estimated_fix_rate": "30%",
+      "dependencies": "Requires detailed investigation"
+    },
+    "type_mismatch": {
+      "difficulty": "MEDIUM",
+      "confidence": "MEDIUM",
+      "strategy": "Investigate and fix type_mismatch issues",
+      "estimated_fix_rate": "60%",
+      "dependencies": "Requires detailed investigation"
+    }
+  },
+  "easy_fixes_summary": {
+    "total_potential_fixes": 1118,
+    "current_total_errors": 1447,
+    "potential_reduction_percentage": 77.3,
+    "easy_fix_categories": [
+      {
+        "category": "pattern_validation",
+        "error_count": 1000,
+        "estimated_fixes": 950,
+        "fix_rate": "95%"
+      },
+      {
+        "category": "enumeration_mismatch",
+        "error_count": 84,
+        "estimated_fixes": 75,
+        "fix_rate": "90%"
+      },
+      {
+        "category": "length_constraint",
+        "error_count": 104,
+        "estimated_fixes": 93,
+        "fix_rate": "90%"
+      }
+    ]
+  }
+}

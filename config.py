@@ -17,6 +17,16 @@ class RecursionLimits:
     circular_reference_depth: int = 2
 
 
+@dataclass 
+class IterativeProcessing:
+    """Configuration for iterative XML generation (memory safe, no recursion)."""
+    enable_iterative_processing: bool = True  # Enable iterative approach by default
+    max_processing_depth: int = 50  # Maximum depth for iterative processing
+    max_elements_per_queue: int = 10000  # Maximum elements in processing queue
+    enable_constraint_caching: bool = True  # Enable constraint extraction caching
+    enable_element_tracking: bool = True  # Enable element processing tracking
+
+
 @dataclass
 class ElementCounts:
     """Configuration for element generation counts."""
@@ -164,6 +174,7 @@ class Config:
     
     def __init__(self, config_file: Optional[str] = None):
         self.recursion = RecursionLimits()
+        self.iterative = IterativeProcessing()
         self.elements = ElementCounts()
         self.data_generation = DataGeneration()
         self.schema_patterns = SchemaPatterns()

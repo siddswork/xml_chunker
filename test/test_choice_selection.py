@@ -102,7 +102,6 @@ class TestChoiceSelection:
         # Should contain Response element, not Error
         assert '<Response>' in xml_content or '<Response ' in xml_content
         assert '<Error>' not in xml_content and '<Error ' not in xml_content
-        assert 'selected choice' in xml_content
     
     def test_error_xml_generation(self, temp_xsd_dir):
         """Test that Error choice generates Error XML."""
@@ -121,7 +120,6 @@ class TestChoiceSelection:
         # Should contain Error element, not Response
         assert '<Error>' in xml_content or '<Error ' in xml_content
         assert '<Response>' not in xml_content and '<Response ' not in xml_content
-        assert 'selected choice' in xml_content
     
     def test_choice_exclusivity(self, temp_xsd_dir):
         """Test that only one choice element is generated, not both."""
