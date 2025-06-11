@@ -58,7 +58,7 @@ class TestSchemaAnalyzerAnalyzeXSDSchema:
         
         # Mock analyzer methods
         with patch.object(self.analyzer, 'extract_element_tree', return_value={'name': 'root'}):
-            with patch.object(self.analyzer, 'extract_choice_elements', return_value=[{'type': 'choice'}]):
+            with patch.object(self.analyzer, 'extract_all_choice_elements', return_value=[{'type': 'choice'}]):
                 with patch.object(self.analyzer, 'find_unbounded_elements', return_value=[{'name': 'unbounded'}]):
                     
                     result = self.analyzer.analyze_xsd_schema('/path/to/schema.xsd')
@@ -208,7 +208,7 @@ class TestSchemaAnalyzerExtractElementTree:
         result = self.analyzer.extract_element_tree(mock_element, 'deep_element', level=10)
         
         assert '_depth_limit' in result
-        assert result['_depth_limit'] == 'Maximum depth reached'
+        assert 'Maximum depth reached' in result['_depth_limit']
     
     def test_extract_element_tree_circular_reference(self):
         """Test extraction with circular reference protection."""

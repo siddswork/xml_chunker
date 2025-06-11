@@ -371,6 +371,45 @@ class XMLGenerator:
                 
         return is_optional, occurrence_info
     
+    def _should_include_optional_element(self, element_name: str, element_path: str, depth: int) -> bool:
+        """Determine if an optional element should be included based on generation mode and user selections."""
+        # Check if we have generation mode configured
+        if not hasattr(self, 'generation_mode'):
+            # Default to current behavior if not configured
+            return depth < 2
+        
+        if self.generation_mode == "Minimalistic":
+            # Current behavior - only shallow optional elements
+            return depth < 2
+        elif self.generation_mode == "Complete":
+            # Include all optional elements up to depth limit
+            return depth < getattr(self, 'optional_depth_limit', 5)
+        elif self.generation_mode == "Custom":
+            # Check if this specific element is selected by user
+            if not hasattr(self, 'optional_selections'):
+                return depth < 2  # Fallback
+            
+            # Check if any selection matches this element
+            # We need to match against both the element name and possible path variations
+            possible_matches = [
+                element_name,
+                element_path,
+                f"{element_path}_{element_name}",
+                element_name.split(':')[-1] if ':' in element_name else element_name
+            ]
+            
+            # Check if any of our possible matches are in the user selections
+            for selection in self.optional_selections:
+                for match in possible_matches:
+                    if match in selection or selection.endswith(match):
+                        return True
+            
+            # If not explicitly selected, don't include
+            return False
+        else:
+            # Unknown mode - default to current behavior
+            return depth < 2
+    
     def _get_element_count(self, element_name: str, element: xmlschema.validators.XsdElement, depth: int = 0) -> int:
         """Get the count for repeating elements with depth-aware limits."""
         if element is None or not element_name:
@@ -540,7 +579,7 @@ class XMLGenerator:
                                 result[child_name] = [self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
                             else:
                                 result[child_name] = self._create_element_dict(child, f"{current_path}.{child_name}", depth + 1)
-                        elif depth < 2:  # Only very shallow optional elements to avoid bloat
+                        elif self._should_include_optional_element(child_name, current_path, depth):  # Include based on generation mode
                             if child.max_occurs is None or child.max_occurs > 1:
                                 count = self._get_element_count(child_name, child, depth)
                                 safe_count = min(count, 1)  # Limit to 1 for optional
@@ -571,7 +610,7 @@ class XMLGenerator:
                                         result[child_name] = [self._create_element_dict(nested_child, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
                                     else:
                                         result[child_name] = self._create_element_dict(nested_child, f"{current_path}.{child_name}", depth + 1)
-                                elif depth < 2:  # Only very shallow optional elements
+                                elif self._should_include_optional_element(child_name, current_path, depth):  # Include based on generation mode
                                     if nested_child.max_occurs is None or nested_child.max_occurs > 1:
                                         count = self._get_element_count(child_name, nested_child, depth)
                                         safe_count = min(count, 1)  # Limit to 1 for optional
@@ -860,7 +899,7 @@ class XMLGenerator:
             # Check if required
             min_occurs = getattr(child, 'min_occurs', 1) or 0
             
-            if min_occurs > 0 or depth < 2:  # Required elements or shallow optional
+            if min_occurs > 0 or self._should_include_optional_element(child_name, current_path, depth):  # Required elements or include based on generation mode
                 if child.max_occurs is None or child.max_occurs > 1:
                     count = self._get_element_count(child_name, child, depth)
                     safe_count = min(count, max(1, 5 - depth))
@@ -1158,7 +1197,7 @@ class XMLGenerator:
                                         parent_dict[child_name].append({})
                                 else:
                                     element_queue.append((child, new_path, depth + 1, parent_dict, child_name))
-                            elif depth < 2:  # Only very shallow optional elements to avoid bloat
+                            elif self._should_include_optional_element(child_name, current_path, depth):  # Include based on generation mode
                                 if child.max_occurs is None or child.max_occurs > 1:
                                     count = self._get_element_count(child_name, child, depth)
                                     safe_count = min(count, 1)  # Limit to 1 for optional
@@ -1197,7 +1236,7 @@ class XMLGenerator:
                                                 parent_dict[child_name].append({})
                                         else:
                                             element_queue.append((nested_child, new_path, depth + 1, parent_dict, child_name))
-                                    elif depth < 2:  # Only very shallow optional elements
+                                    elif self._should_include_optional_element(child_name, current_path, depth):  # Include based on generation mode
                                         if nested_child.max_occurs is None or nested_child.max_occurs > 1:
                                             count = self._get_element_count(child_name, nested_child, depth)
                                             safe_count = min(count, 1)  # Limit to 1 for optional
@@ -1294,6 +1333,37 @@ class XMLGenerator:
         # Store user preferences
         self.user_choices = selected_choices or {}
         self.user_unbounded_counts = unbounded_counts or {}
+        
+        return self.generate_dummy_xml(output_path)
+    
+    def generate_dummy_xml_with_options(self, selected_choices=None, unbounded_counts=None, generation_mode="Minimalistic", optional_selections=None, output_path=None) -> str:
+        """Generate XML with comprehensive user options including generation mode and optional element selection."""
+        if not self.schema:
+            return '<?xml version="1.0" encoding="UTF-8"?><error>Failed to load schema</error>'
+        
+        # Store user preferences
+        self.user_choices = selected_choices or {}
+        self.user_unbounded_counts = unbounded_counts or {}
+        self.generation_mode = generation_mode
+        self.optional_selections = set(optional_selections or [])
+        
+        # Configure depth limits based on generation mode
+        if generation_mode == "Complete":
+            self.optional_depth_limit = 6  # Include optional elements up to depth 6 (deeper than 5)
+            # Ensure config limits are sufficient for Complete mode
+            if self.config.recursion.max_tree_depth < 6:
+                self.config.recursion.max_tree_depth = 6
+            if self.config.recursion.max_element_depth < 10:
+                self.config.recursion.max_element_depth = 10
+        elif generation_mode == "Custom":
+            self.optional_depth_limit = 10  # Allow deep selection in custom mode
+            # Ensure config limits are sufficient for Custom mode
+            if self.config.recursion.max_tree_depth < 10:
+                self.config.recursion.max_tree_depth = 10
+            if self.config.recursion.max_element_depth < 12:
+                self.config.recursion.max_element_depth = 12
+        else:  # Minimalistic
+            self.optional_depth_limit = 2  # Current behavior
         
         return self.generate_dummy_xml(output_path)
     
@@ -1458,7 +1528,7 @@ class XMLGenerator:
                                 self._build_xml_tree(child_element, item)
                             else:
                                 # Prevent empty list items
-                                if item is not None and str(item).strip():
+                                if item is not None and self._is_valid_content(item):
                                     child_element.text = str(item)
                                 else:
                                     fallback_value = self._generate_fallback_for_empty_element(k, qname)
@@ -1469,7 +1539,7 @@ class XMLGenerator:
                             self._build_xml_tree(child_element, v)
                         else:
                             # Prevent empty elements - ensure we have valid content
-                            if v is not None and str(v).strip():
+                            if v is not None and self._is_valid_content(v):
                                 child_element.text = str(v)
                             else:
                                 # Generate appropriate fallback value based on element name
@@ -1523,7 +1593,7 @@ class XMLGenerator:
                                     build_queue.append((child_element, item))
                                 else:
                                     # Handle non-dict items directly
-                                    if item is not None and str(item).strip():
+                                    if item is not None and self._is_valid_content(item):
                                         child_element.text = str(item)
                                     else:
                                         fallback_value = self._generate_fallback_for_empty_element(k, qname)
@@ -1535,7 +1605,7 @@ class XMLGenerator:
                                 build_queue.append((child_element, v))
                             else:
                                 # Handle non-dict values directly
-                                if v is not None and str(v).strip():
+                                if v is not None and self._is_valid_content(v):
                                     child_element.text = str(v)
                                 else:
                                     fallback_value = self._generate_fallback_for_empty_element(k, qname)
@@ -1552,6 +1622,26 @@ class XMLGenerator:
         else:
             ns_uri = self.schema.target_namespace
             return etree.QName(ns_uri, element_name) if ns_uri else element_name
+    
+    def _is_valid_content(self, value: Any) -> bool:
+        """Check if a value is valid content for XML elements (including numeric zeros)."""
+        if value is None:
+            return False
+        
+        # Handle numeric types explicitly - 0 and 0.0 are valid
+        if isinstance(value, (int, float)):
+            return True
+        
+        # Handle boolean types - False is valid
+        if isinstance(value, bool):
+            return True
+        
+        # Handle string types - empty strings are invalid
+        if isinstance(value, str):
+            return value.strip() != ""
+        
+        # For other types, convert to string and check
+        return str(value).strip() != ""
     
     def _generate_fallback_for_empty_element(self, element_name: str, qname) -> str:
         """Generate appropriate fallback value for empty elements based on name patterns."""
@@ -1623,6 +1713,10 @@ class XMLGenerator:
         # Date/time elements
         if any(keyword in element_lower for keyword in ['date', 'time']):
             return '2024-06-08T12:00:00Z'
+        
+        # Duration elements
+        if any(keyword in element_lower for keyword in ['duration']):
+            return 'PT1H30M'  # 1 hour 30 minutes in ISO 8601 duration format
         
         # Text and description elements
         if any(keyword in element_lower for keyword in ['text', 'name', 'description', 'title']):

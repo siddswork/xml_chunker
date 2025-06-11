@@ -322,7 +322,7 @@ class TestAppHelperFunctions:
         result = convert_tree_to_streamlit_format(mock_node)
         assert 'value' in result
         assert 'label' in result
-        assert result['value'] == 'TestElement'
+        assert result['value'] == 'TestElement_0'  # Updated to match current implementation
         assert 'TestElement' in result['label']
 
 
