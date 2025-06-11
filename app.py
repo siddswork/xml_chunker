@@ -283,6 +283,34 @@ def format_validation_error(error):
     """
     return xml_validator.format_validation_error(error)
 
+def clean_selection_display_name(selection):
+    """
+    Clean up tree selection names for display in the summary.
+    
+    Args:
+        selection: Raw selection string like "IATA_OrderViewRS.Response.DataLists.BaggageAllowanceList.BaggageAllowance.PieceAllowance_77"
+        
+    Returns:
+        Cleaned display string like "IATA_OrderViewRS → Response → DataLists → BaggageAllowanceList → BaggageAllowance → PieceAllowance"
+    """
+    if not selection:
+        return selection
+    
+    # Remove the trailing unique number (e.g., "_77", "_123")
+    # Pattern: remove _[number] at the end
+    import re
+    cleaned = re.sub(r'_\d+$', '', selection)
+    
+    # Replace dots with arrows for better readability
+    if '.' in cleaned:
+        path_parts = cleaned.split('.')
+        # Take the last 5-6 parts to avoid too long display, but show meaningful context
+        if len(path_parts) > 6:
+            path_parts = ['...'] + path_parts[-5:]
+        return ' → '.join(path_parts)
+    else:
+        return cleaned
+
 def validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name=None, uploaded_file_content=None):
     """
     Validate generated XML against the XSD schema.
@@ -298,15 +326,17 @@ def validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name=N
     """
     return xml_validator.validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name, uploaded_file_content)
 
-def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, unbounded_counts=None):
+def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, unbounded_counts=None, generation_mode="Minimalistic", optional_selections=None):
     """
-    Generate XML from XSD schema with user-specified choices.
+    Generate XML from XSD schema with user-specified choices and generation mode.
     
     Args:
         xsd_file_path: Path to the XSD file
         xsd_file_name: Original name of the XSD file
         selected_choices: Dictionary of selected choices for generation
         unbounded_counts: Dictionary of counts for unbounded elements
+        generation_mode: Generation strategy ("Minimalistic", "Complete", "Custom")
+        optional_selections: List of optional element paths to include (for Custom mode)
         
     Returns:
         Generated XML content
@@ -315,11 +345,13 @@ def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, u
         file_manager.setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name)
         generator = XMLGenerator(xsd_file_path)
         
-        # Pass user selections to generator if available
-        if selected_choices or unbounded_counts:
-            return generator.generate_dummy_xml_with_choices(selected_choices, unbounded_counts)
-        else:
-            return generator.generate_dummy_xml()
+        # Pass user selections and generation mode to generator
+        return generator.generate_dummy_xml_with_options(
+            selected_choices=selected_choices, 
+            unbounded_counts=unbounded_counts,
+            generation_mode=generation_mode,
+            optional_selections=optional_selections
+        )
     except Exception as e:
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <error>
@@ -371,10 +403,36 @@ def main():
                         st.caption(f"**Namespace:** {schema_info.get('target_namespace', 'N/A')}")
                         st.caption(f"**Elements:** {schema_info.get('elements_count', 0)} | **Types:** {schema_info.get('types_count', 0)}")
                     
+                    # XML Generation Mode Selection
+                    with st.expander("⚙️ XML Generation Mode", expanded=True):
+                        st.markdown("**Choose how to generate XML from optional elements:**")
+                        
+                        generation_mode = st.radio(
+                            "Generation Strategy:",
+                            options=["Minimalistic", "Complete", "Custom"],
+                            index=0,
+                            key="generation_mode",
+                            help="Minimalistic: Required + shallow optional | Complete: All elements | Custom: Tree selection below"
+                        )
+                        
+                        if generation_mode == "Minimalistic":
+                            st.info("🔹 **Minimalistic**: Includes required elements + optional elements at depth < 2 (current behavior)")
+                        elif generation_mode == "Complete":
+                            st.info("🔹 **Complete**: Includes ALL optional elements up to depth 6 (may create large XMLs)")
+                        else:  # Custom
+                            st.info("🔹 **Custom**: Select specific optional elements using the tree below")
+                    
                     # Tree structure display with professional tree component
                     with st.expander("🌳 Schema Structure", expanded=True):
                         if element_tree:
-                            st.markdown("*Interactive schema tree - expand/collapse nodes to explore structure*")
+                            # Check current generation mode
+                            current_mode = generation_mode
+                            
+                            if current_mode == "Custom":
+                                st.markdown("*Select optional elements to include in XML generation*")
+                                st.warning("**Custom Mode**: ☑️ Check optional elements (📄 [0:1]) you want to include. Required elements (📝 [1:1]) are always included.")
+                            else:
+                                st.markdown("*Interactive schema tree - expand/collapse nodes to explore structure*")
                             
                             # Convert our tree format to streamlit_tree_select format
                             tree_nodes = []
@@ -386,23 +444,36 @@ def main():
                             # Display the tree with streamlit_tree_select
                             if tree_nodes:
                                 # Add legend and helpful information
-                                st.info("""💡 **Symbol Legend & Tips:**
+                                if current_mode == "Custom":
+                                    st.info("""💡 **Element Selection Guide:**
+
+📝 **Required Elements [1:1]** - Always included (cannot uncheck)
+
+📄 **Optional Elements [0:1]** - Check to include in XML generation
+
+🔄 **Repeating Elements [1:∞]** - Always included if required, optional if [0:∞]
+
+🔀 **Choice Elements** - Use choice selection below for these
+
+⚬ **Choice Options** - Available within choice elements
+
+*Check the optional elements you want in your generated XML*""")
+                                else:
+                                    st.info("""💡 **Schema Structure Legend:**
 
 🔀 **Choice Elements** - Select one option from multiple choices
 
 🔄 **Repeating Elements** - Can occur multiple times (1-∞, 2-5, etc.)
 
-📝 **Single Elements** - Occurs exactly once [1:1]
+📝 **Required Elements** - Must occur [1:1] or [1:∞]
 
-📄 **Simple Types** - Basic data types (string, int, etc.)
+📄 **Optional Elements** - May occur [0:1] or [0:∞]
 
 ⚬ **Choice Options** - Available options within a choice element
 
 ℹ️ **Type Information** - Additional schema details
 
-⚠️ **Warnings/Errors** - Schema processing messages
-
-*If tree text appears dim, try switching to Streamlit's light theme in Settings > Theme*""")
+*Tree is read-only in Minimalistic/Complete modes*""")
                                 
                                 # Auto-expand more levels to show tree structure better
                                 auto_expanded = []
@@ -418,20 +489,46 @@ def main():
                                     
                                     add_expanded_children(tree_nodes[0])
                                 
+                                # Configure tree selection based on mode
+                                if current_mode == "Custom":
+                                    check_model = "leaf"  # Allow checking individual elements
+                                    disabled = False
+                                else:
+                                    check_model = "leaf"  # Keep same model but won't use selections
+                                    disabled = False  # Keep interactive for exploration
+                                
                                 selected = tree_select(
                                     tree_nodes,
                                     key="schema_tree",
-                                    check_model="leaf",  # Only leaf nodes can be checked
-                                    expanded=auto_expanded,  # Auto-expand multiple levels
-                                    no_cascade=True  # Don't cascade selections
+                                    check_model=check_model,
+                                    expanded=auto_expanded,
+                                    no_cascade=True,
+                                    disabled=disabled
                                 )
                                 
-                                # Show selected information
-                                if selected and selected.get('checked'):
+                                # Show selected information based on mode
+                                if current_mode == "Custom":
+                                    if selected and selected.get('checked'):
+                                        st.markdown("---")
+                                        st.markdown("**Selected Optional Elements:**")
+                                        # Store selections for XML generation
+                                        optional_selections = []
+                                        for item in selected['checked']:
+                                            clean_display = clean_selection_display_name(item)
+                                            st.markdown(f"• `{clean_display}`")
+                                            optional_selections.append(item)
+                                        st.session_state['optional_element_selections'] = optional_selections
+                                    else:
+                                        st.session_state['optional_element_selections'] = []
+                                    
+                                elif selected and selected.get('checked'):
                                     st.markdown("---")
-                                    st.markdown("**Selected Elements:**")
+                                    st.markdown("**Selected for Exploration:**")
                                     for item in selected['checked']:
                                         st.markdown(f"• `{item}`")
+                                
+                                # Store current generation mode for later access
+                                st.session_state['current_generation_mode'] = current_mode
                         else:
                             st.info("No schema structure could be extracted from this XSD file.")
                     
@@ -532,6 +629,22 @@ def main():
         # Show current selections summary in a centered column
         col_summary1, col_summary2, col_summary3 = st.columns([1, 2, 1])
         with col_summary2:
+            # Show generation mode (get from session state since widget may not be available here)
+            current_mode = st.session_state.get('current_generation_mode', 'Minimalistic')
+            st.caption(f"**Generation Mode**: {current_mode}")
+            
+            if current_mode == "Custom" and 'optional_element_selections' in st.session_state:
+                selections = st.session_state['optional_element_selections']
+                if selections:
+                    st.caption(f"**Selected Optional Elements** ({len(selections)}):")
+                    for selection in selections[:5]:  # Show first 5
+                        clean_name = clean_selection_display_name(selection)
+                        st.caption(f"• {clean_name}")
+                    if len(selections) > 5:
+                        st.caption(f"• ... and {len(selections) - 5} more")
+                else:
+                    st.caption("**Selected Optional Elements**: None")
+            
             if 'selected_choices' in st.session_state and st.session_state['selected_choices']:
                 st.caption("**Selected Choices:**")
                 for choice_key, choice_data in st.session_state['selected_choices'].items():
@@ -555,12 +668,16 @@ def main():
                 # Get user selections from session state
                 selected_choices = st.session_state.get('selected_choices', {})
                 unbounded_counts = st.session_state.get('unbounded_counts', {})
+                generation_mode = st.session_state.get('current_generation_mode', 'Minimalistic')
+                optional_selections = st.session_state.get('optional_element_selections', [])
                 
                 xml_content = generate_xml_from_xsd(
                     temp_file_path, 
                     file_name, 
                     selected_choices, 
-                    unbounded_counts
+                    unbounded_counts,
+                    generation_mode,
+                    optional_selections
                 )
                 
                 # Store XML content and file info in session state for validation

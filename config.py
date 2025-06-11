@@ -164,7 +164,7 @@ class UISettings:
     """Configuration for UI-related settings."""
     default_page_title: str = "XML Chunker"
     max_file_upload_mb: int = 10
-    default_tree_depth: int = 8  # Increased depth to show more schema levels
+    default_tree_depth: int = 10  # Increased depth for Complete mode XML generation
     show_debug_info: bool = False
     enable_download: bool = True
 

@@ -774,6 +774,8 @@ class TypeGeneratorFactory:
                 return DateTimeTypeGenerator(self.config, 'date')
             elif "'xs:time'" in type_str:
                 return DateTimeTypeGenerator(self.config, 'time')
+            elif "'xs:duration'" in type_str:
+                return DateTimeTypeGenerator(self.config, 'duration')
             elif "'xs:boolean'" in type_str:
                 return BooleanTypeGenerator(self.config)
             elif "'xs:string'" in type_str or "'xs:token'" in type_str:
@@ -788,6 +790,8 @@ class TypeGeneratorFactory:
             return BooleanTypeGenerator(self.config)
         elif 'datetime' in type_str:
             return DateTimeTypeGenerator(self.config, 'datetime')
+        elif 'duration' in type_str:
+            return DateTimeTypeGenerator(self.config, 'duration')
         elif 'date' in type_str:
             return DateTimeTypeGenerator(self.config, 'date')
         elif 'time' in type_str:
