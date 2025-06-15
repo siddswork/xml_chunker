@@ -276,12 +276,47 @@ class XMLGenerator:
             # Fallback to original method if type resolver not available
             return self._generate_value_for_type_fallback(type_name, element_name)
         
-        # Use universal type resolver to get primitive type
+        # Use universal type resolver to get primitive type and constraints
         primitive_type, constraints = self.type_resolver.resolve_to_primitive_type(type_name)
+        
+        # CRITICAL: Also extract enumeration from the original type object for comprehensive coverage
+        self._enhance_enumeration_constraints(type_name, constraints)
         
         # Create appropriate type generator based on resolved primitive type
         generator = self._create_generator_from_primitive_type(primitive_type, constraints)
         return generator.generate(element_name, constraints)
+    
+    def _enhance_enumeration_constraints(self, type_name, constraints: Dict[str, Any]):
+        """Enhance constraints with comprehensive enumeration extraction."""
+        if 'enum_values' in constraints:
+            return  # Already have enumeration values
+        
+        # Try multiple enumeration extraction methods
+        enum_values = []
+        
+        # Method 1: Direct enumeration attribute
+        if hasattr(type_name, 'enumeration') and type_name.enumeration:
+            enum_values = [str(value) for value in type_name.enumeration]
+        
+        # Method 2: Facets enumeration
+        elif hasattr(type_name, 'facets') and type_name.facets:
+            for facet_name, facet in type_name.facets.items():
+                if 'enumeration' in str(facet_name).lower():
+                    if hasattr(facet, 'enumeration') and facet.enumeration:
+                        enum_values = [str(val) for val in facet.enumeration]
+                        break
+                    elif hasattr(facet, '__iter__'):
+                        enum_values = [str(val) for val in facet]
+                        break
+        
+        # Method 3: For XsdAtomicRestriction, check base type enumeration
+        if not enum_values and hasattr(type_name, 'base_type'):
+            self._enhance_enumeration_constraints(type_name.base_type, constraints)
+            if 'enum_values' in constraints:
+                return
+        
+        if enum_values:
+            constraints['enum_values'] = enum_values
     
     def _generate_value_for_type_fallback(self, type_name, element_name: str = "") -> Any:
         """Fallback method using original type factory (for compatibility)."""

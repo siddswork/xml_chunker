@@ -153,11 +153,15 @@ class UniversalXSDTypeResolver:
         """Extract constraint information from restricted types."""
         constraints = {}
         
-        # Extract facets (restrictions)
+        # Extract facets (restrictions) - enhanced enumeration extraction
         if hasattr(restricted_type, 'facets') and restricted_type.facets:
             for facet_name, facet in restricted_type.facets.items():
                 if facet_name == 'enumeration':
-                    constraints['enum_values'] = [str(val) for val in facet]
+                    # Handle enumeration facets properly
+                    if hasattr(facet, '__iter__'):
+                        constraints['enum_values'] = [str(val) for val in facet]
+                    else:
+                        constraints['enum_values'] = [str(facet)]
                 elif facet_name == 'pattern':
                     constraints['pattern'] = str(facet)
                 elif facet_name == 'minLength':
@@ -174,6 +178,10 @@ class UniversalXSDTypeResolver:
                     constraints['fraction_digits'] = int(facet)
                 elif facet_name == 'totalDigits':
                     constraints['total_digits'] = int(facet)
+        
+        # Alternative enumeration extraction for xmlschema objects
+        if hasattr(restricted_type, 'enumeration') and restricted_type.enumeration:
+            constraints['enum_values'] = [str(val) for val in restricted_type.enumeration]
         
         return constraints
     
