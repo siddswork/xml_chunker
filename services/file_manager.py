@@ -33,32 +33,58 @@ class FileManager:
             xsd_file_name: Original name of the XSD file
         """
         try:
-            resource_dir = self.config.get_resource_dir('iata')
-            
-            if not os.path.exists(resource_dir):
-                print(f"Warning: Resource directory not found: {resource_dir}")
-                return
-                
             temp_dir = os.path.dirname(xsd_file_path)
             if not os.path.exists(temp_dir):
                 print(f"Warning: Temp directory not found: {temp_dir}")
                 return
             
-            for filename in os.listdir(resource_dir):
-                if filename.endswith('.xsd') and filename != xsd_file_name:
-                    try:
-                        src_path = os.path.join(resource_dir, filename)
-                        dst_path = os.path.join(temp_dir, filename)
-                        
-                        if os.path.exists(src_path) and os.path.isfile(src_path):
-                            with open(src_path, 'rb') as src_file:
-                                with open(dst_path, 'wb') as dst_file:
-                                    dst_file.write(src_file.read())
-                    except Exception as e:
-                        print(f"Warning: Could not copy {filename}: {e}")
+            # Find the source directory of the uploaded XSD file
+            source_dir = self._find_source_directory(xsd_file_path, xsd_file_name)
+            
+            if source_dir and os.path.exists(source_dir):
+                print(f"Looking for dependencies in: {source_dir}")
+                
+                # Copy all XSD files from source directory except the main file
+                for filename in os.listdir(source_dir):
+                    if filename.endswith('.xsd') and filename != xsd_file_name:
+                        try:
+                            src_path = os.path.join(source_dir, filename)
+                            dst_path = os.path.join(temp_dir, filename)
+                            
+                            if os.path.exists(src_path) and os.path.isfile(src_path):
+                                with open(src_path, 'rb') as src_file:
+                                    with open(dst_path, 'wb') as dst_file:
+                                        dst_file.write(src_file.read())
+                                print(f"Copied dependency: {filename}")
+                        except Exception as e:
+                            print(f"Warning: Could not copy {filename}: {e}")
+            else:
+                print(f"Warning: Could not find source directory for {xsd_file_name}")
                         
         except Exception as e:
             print(f"Warning: Error setting up dependencies: {e}")
+    
+    def _find_source_directory(self, xsd_file_path: str, xsd_file_name: str) -> Optional[str]:
+        """
+        Find the source directory containing the XSD file and its dependencies.
+        
+        Args:
+            xsd_file_path: Path to the XSD file (might be in temp directory)
+            xsd_file_name: Name of the XSD file
+            
+        Returns:
+            Path to the source directory containing dependencies, or None if not found
+        """
+        # If the XSD file path is a temp file, we need to find the original location
+        # Start from the current working directory and look for the file
+        current_dir = os.getcwd()
+        
+        # Look for the file in current directory and all subdirectories
+        for root, dirs, files in os.walk(current_dir):
+            if xsd_file_name in files:
+                return root
+        
+        return None
     
     def create_temp_file(self, content: str, suffix: str = '.xml', encoding: str = 'utf-8') -> str:
         """

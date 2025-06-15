@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- edited with XMLSpy v2014 rel. 2 (x64) (http://www.altova.com) by Bert Brid (Farelogix Inc.) -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"   elementFormDefault="qualified" attributeFormDefault="unqualified" version="5.000" id="IATA2017.2" xmlns="http://ndc.farelogix.com/aug" targetNamespace="http://ndc.farelogix.com/aug" >
+	<xsd:annotation>
+		<xsd:documentation xml:lang="en">EDIST XML Specification Base Structures. Includes base types for EDIST XML data objects, utility xml objects and core simple type definitions.</xsd:documentation>
+	</xsd:annotation>
+				<xsd:element name="FeeGroup">
+		<xsd:complexType>
+			<xsd:sequence>
+				<xsd:element ref="Fee"  maxOccurs="unbounded"/>
+			</xsd:sequence>
+		<xsd:attribute name="Amount" type="xsd:integer" use="required">
+						<xsd:annotation>
+							<xsd:documentation>Total fee amount for the Fare
+ Example: 200000</xsd:documentation>
+						</xsd:annotation>
+					</xsd:attribute>
+		</xsd:complexType>
+		
+	</xsd:element>
+					<xsd:element name="Fee" >
+							<xsd:complexType>
+								<xsd:sequence>
+									<xsd:element name="Amount" type="xsd:integer">
+										<xsd:annotation>
+											<xsd:documentation>Fee amount including taxes. Example: 2000</xsd:documentation>
+										</xsd:annotation>
+									</xsd:element>
+									<xsd:element name="BasePrice" minOccurs="0">
+										<xsd:annotation>
+											<xsd:documentation source="description" xml:lang="en">Base (net) price of option.</xsd:documentation>
+										</xsd:annotation>
+										<xsd:complexType>
+											<xsd:attribute name="Amount" type="xsd:integer" use="required">
+												<xsd:annotation>
+													<xsd:documentation source="description" xml:lang="en">Net price of option.
+Example: 6750</xsd:documentation>
+												</xsd:annotation>
+											</xsd:attribute>
+										</xsd:complexType>
+									</xsd:element>
+									<xsd:element name="Taxes" minOccurs="0">
+										<xsd:annotation>
+											<xsd:documentation>Taxes Group</xsd:documentation> 
+										</xsd:annotation>
+										<xsd:complexType>
+											<xsd:sequence minOccurs="0">
+												<xsd:element name="Tax" minOccurs="0" maxOccurs="unbounded">
+													<xsd:annotation>
+														<xsd:documentation>Tax break down information group</xsd:documentation>
+													</xsd:annotation>
+													<xsd:complexType>
+														<xsd:sequence>
+															<xsd:element name="Designator" type="xsd:string" minOccurs="0"/>
+															<xsd:element name="Nature" type="xsd:string" minOccurs="0"/>
+															<xsd:element name="Description" type="xsd:string" minOccurs="0"/>
+															<xsd:element name="Diagnostics" minOccurs="0">
+																<xsd:complexType>
+																	<xsd:simpleContent>
+																		<xsd:extension base="xsd:string">
+																			<xsd:attribute name="ID" type="xsd:integer" use="optional"/>
+																		</xsd:extension>
+																	</xsd:simpleContent>
+																</xsd:complexType>
+															</xsd:element>
+															<xsd:element name="CurrencyCode" minOccurs="0">
+																<xsd:annotation>
+																	<xsd:documentation>Amount in local value</xsd:documentation>
+																</xsd:annotation>
+																<xsd:complexType>
+																	<xsd:simpleContent>
+																		<xsd:extension base="xsd:string">
+																			<xsd:attribute name="NumberOfDecimals" type="xsd:nonNegativeInteger" use="required">
+																				<xsd:annotation>
+																					<xsd:documentation>Decimal position in fare amount.  Example: 2</xsd:documentation>
+																				</xsd:annotation>
+																			</xsd:attribute>
+																		</xsd:extension>
+																	</xsd:simpleContent>
+																</xsd:complexType>
+															</xsd:element>
+															<xsd:element name="LocalAmount" minOccurs="0">
+																<xsd:annotation>
+																	<xsd:documentation>Amount in local value</xsd:documentation>
+																</xsd:annotation>
+															</xsd:element>
+															<xsd:element name="CollectionPoint" minOccurs="0" maxOccurs="unbounded">
+																<xsd:annotation>
+																	<xsd:documentation>NOTE: this definition will eventually supercede the Calculation element. Use this  group instead of Calculation as Calculation will be deprecated in near future.
+
+For XF and ZP taxes. 
+Tax data break down for each collection point.  
+
+The sum of individual amounts entered here must  be equal to the Amount entered in the Tax element.</xsd:documentation>
+																</xsd:annotation>
+																<xsd:complexType>
+																	<xsd:sequence>
+																		<xsd:element name="AirportCode" type="xsd:string"/>
+																		<xsd:element name="AirportAmount">
+																			<xsd:annotation>
+																				<xsd:documentation>The amount actually filed by the airport in the currency applicable to the geographical location of the airport
+(same as shown in FareCalculation line)</xsd:documentation>
+																			</xsd:annotation>
+																		</xsd:element>
+																		<xsd:element name="CurrencyCode" minOccurs="0">
+																			<xsd:annotation>
+																				<xsd:documentation>Amount in local value</xsd:documentation>
+																			</xsd:annotation>
+																			<xsd:complexType>
+																				<xsd:simpleContent>
+																					<xsd:extension base="xsd:string">
+																						<xsd:attribute name="NumberOfDecimals" type="xsd:nonNegativeInteger" use="required">
+																							<xsd:annotation>
+																								<xsd:documentation>Decimal position in fare amount.  Example: 2</xsd:documentation>
+																							</xsd:annotation>
+																						</xsd:attribute>
+																					</xsd:extension>
+																				</xsd:simpleContent>
+																			</xsd:complexType>
+																		</xsd:element>
+																	</xsd:sequence>
+																	<xsd:attribute name="Amount" type="xsd:integer">
+																		<xsd:annotation>
+																			<xsd:documentation>Individual amount for collection point.  
+Example: 2500</xsd:documentation>
+																		</xsd:annotation>
+																	</xsd:attribute>
+																</xsd:complexType>
+															</xsd:element>
+														</xsd:sequence>
+														<xsd:attribute name="Amount" type="xsd:integer" use="required">
+															<xsd:annotation>
+																<xsd:documentation>Individual tax amount.  Example: 6500</xsd:documentation>
+															</xsd:annotation>
+														</xsd:attribute>
+														<xsd:attribute name="Refundable" use="optional">
+															<xsd:annotation>
+																<xsd:documentation>Indicates if tax is refundable.  Values are:
+Y = Tax refundable (default)
+N = Tax not refundable
+Example: N</xsd:documentation>
+															</xsd:annotation>
+															<xsd:simpleType>
+																<xsd:restriction base="xsd:string">
+																	<xsd:enumeration value="Y"/>
+																	<xsd:enumeration value="N"/>
+																</xsd:restriction>
+															</xsd:simpleType>
+														</xsd:attribute>
+														<xsd:attribute name="Paid">
+															<xsd:annotation>
+																<xsd:documentation>Indicates the payment status of the tax. PD=Paid, RF=refunded </xsd:documentation>
+															</xsd:annotation>
+															<xsd:simpleType>
+																<xsd:restriction base="xsd:string">
+																	<xsd:enumeration value="PD"/>
+																	<xsd:enumeration value="RF"/>
+																</xsd:restriction>
+															</xsd:simpleType>
+														</xsd:attribute>
+													</xsd:complexType>
+												</xsd:element>
+											</xsd:sequence>
+											<xsd:attribute name="Amount" type="xsd:integer" use="required">
+												<xsd:annotation>
+													<xsd:documentation>Total taxes amount.  Example: 50000</xsd:documentation>
+												</xsd:annotation>
+											</xsd:attribute>
+										</xsd:complexType>
+									</xsd:element>
+									<xsd:element name="Description" type="xsd:string" minOccurs="0">
+										<xsd:annotation>
+											<xsd:documentation>Title description (Commercial Name) of Fee.
+
+Example: "Credit Card Fee"</xsd:documentation>
+										</xsd:annotation>
+									</xsd:element>
+									<xsd:element name="DescriptionDetails" minOccurs="0">
+										<xsd:annotation>
+											<xsd:documentation>Detailed description of this service</xsd:documentation>
+										</xsd:annotation>
+										<xsd:complexType>
+											<xsd:sequence>
+												<xsd:element name="Text" type="xsd:string" maxOccurs="unbounded"/>
+											</xsd:sequence>
+										</xsd:complexType>
+									</xsd:element>
+									<xsd:element name="PassengerRefs" minOccurs="0"/>
+								</xsd:sequence>
+								<xsd:attribute name="ServiceCode">
+									<xsd:annotation>
+										<xsd:documentation>Additional unique ATPCO code. Please refer to FLX Codeset document for acceptable values.
+Example: OC</xsd:documentation>
+									</xsd:annotation>
+								</xsd:attribute>
+								<xsd:attribute name="SubCode">
+									<xsd:annotation>
+										<xsd:documentation>ATPCO RFISC (ReasonForIssuance  Subcode).
+Example of RFISC: 0CC</xsd:documentation>
+									</xsd:annotation>
+								</xsd:attribute>
+								<xsd:attribute name="Refundable">
+									<xsd:annotation>
+										<xsd:documentation>Indicates if fee is refundable.  Values are:
+Y = Fee refundable  N = Fee not refundable. If attribute is not there then
+default is Y.</xsd:documentation>
+									</xsd:annotation>
+									<xsd:simpleType>
+										<xsd:restriction base="xsd:string">
+											<xsd:length value="1"/>
+										</xsd:restriction>
+									</xsd:simpleType>
+								</xsd:attribute>
+							</xsd:complexType>
+						</xsd:element>
+
+	
+		</xsd:schema> 
