@@ -276,11 +276,16 @@ class XMLGenerator:
             # Fallback to original method if type resolver not available
             return self._generate_value_for_type_fallback(type_name, element_name)
         
-        # Use universal type resolver to get primitive type and constraints
-        primitive_type, constraints = self.type_resolver.resolve_to_primitive_type(type_name)
-        
-        # CRITICAL: Also extract enumeration from the original type object for comprehensive coverage
-        self._enhance_enumeration_constraints(type_name, constraints)
+        # If type_name is None but we have element_name, try to resolve from element
+        if type_name is None and element_name:
+            primitive_type, constraints = self.type_resolver.get_element_primitive_type(element_name)
+        else:
+            # Use universal type resolver to get primitive type and constraints
+            primitive_type, constraints = self.type_resolver.resolve_to_primitive_type(type_name)
+            
+            # CRITICAL: Also extract enumeration from the original type object for comprehensive coverage
+            if type_name is not None:
+                self._enhance_enumeration_constraints(type_name, constraints)
         
         # Create appropriate type generator based on resolved primitive type
         generator = self._create_generator_from_primitive_type(primitive_type, constraints)

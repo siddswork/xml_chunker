@@ -9,9 +9,9 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional, Dict, List
 from datetime import datetime
 import re
-import random
 import base64
 import uuid
+import hashlib
 
 
 class BaseTypeGenerator(ABC):
@@ -103,19 +103,70 @@ class NumericTypeGenerator(BaseTypeGenerator):
         return 0.0 if self.is_decimal else 0
     
     def validate_constraints(self, value: Any, constraints: Optional[Dict] = None) -> Any:
-        """Apply numeric constraints like min/max values."""
+        """Apply comprehensive numeric constraints including precision and range."""
         if not constraints:
             return value
         
         numeric_value = float(value) if self.is_decimal else int(value)
         
-        # Apply min/max constraints
+        # Apply inclusive range constraints
         if 'min_value' in constraints:
             numeric_value = max(numeric_value, constraints['min_value'])
         if 'max_value' in constraints:
             numeric_value = min(numeric_value, constraints['max_value'])
         
-        return numeric_value
+        # Apply exclusive range constraints
+        if 'min_value_exclusive' in constraints:
+            min_exclusive = constraints['min_value_exclusive']
+            if numeric_value <= min_exclusive:
+                # Adjust to be greater than exclusive minimum
+                numeric_value = min_exclusive + (1 if not self.is_decimal else 0.01)
+        
+        if 'max_value_exclusive' in constraints:
+            max_exclusive = constraints['max_value_exclusive']
+            if numeric_value >= max_exclusive:
+                # Adjust to be less than exclusive maximum
+                numeric_value = max_exclusive - (1 if not self.is_decimal else 0.01)
+        
+        # Apply decimal precision constraints
+        if self.is_decimal and 'fraction_digits' in constraints:
+            fraction_digits = constraints['fraction_digits']
+            # Round to specified number of decimal places
+            numeric_value = round(numeric_value, fraction_digits)
+        
+        if 'total_digits' in constraints:
+            total_digits = constraints['total_digits']
+            
+            if self.is_decimal:
+                # For decimals, adjust to meet total digits constraint
+                str_value = str(numeric_value)
+                # Remove decimal point for counting
+                digit_count = len(str_value.replace('.', '').replace('-', ''))
+                
+                if digit_count > total_digits:
+                    # Scale down the number to fit total digits
+                    if 'fraction_digits' in constraints:
+                        integer_digits = total_digits - constraints['fraction_digits']
+                        max_integer_part = (10 ** integer_digits) - 1
+                        numeric_value = min(abs(numeric_value), max_integer_part)
+                        if str(value).startswith('-'):
+                            numeric_value = -numeric_value
+                        numeric_value = round(numeric_value, constraints['fraction_digits'])
+                    else:
+                        # Scale down proportionally
+                        scale_factor = 10 ** (digit_count - total_digits)
+                        numeric_value = numeric_value / scale_factor
+            else:
+                # For integers, ensure it doesn't exceed total digits
+                max_integer = (10 ** total_digits) - 1
+                if abs(numeric_value) > max_integer:
+                    numeric_value = max_integer if numeric_value > 0 else -max_integer
+        
+        # Convert back to appropriate type
+        if self.is_integer or (not self.is_decimal):
+            return int(numeric_value)
+        else:
+            return numeric_value
 
 
 class BooleanTypeGenerator(BaseTypeGenerator):
@@ -161,17 +212,25 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
                 else:
                     return pattern_value
         
-        # Generate current timestamp as fallback
-        now = datetime.now()
+        # Generate deterministic timestamp based on element name
+        element_hash = hashlib.md5((element_name or "default").encode('utf-8')).hexdigest()
+        
+        # Create deterministic date components from hash
+        year = 2024  # Fixed year for consistency
+        month = (int(element_hash[:2], 16) % 12) + 1  # 1-12
+        day = (int(element_hash[2:4], 16) % 28) + 1   # 1-28 (safe for all months)
+        hour = int(element_hash[4:6], 16) % 24         # 0-23
+        minute = int(element_hash[6:8], 16) % 60       # 0-59
+        second = int(element_hash[8:10], 16) % 60      # 0-59
         
         if self.date_type == 'date':
-            return now.strftime('%Y-%m-%d')
+            return f"{year:04d}-{month:02d}-{day:02d}"
         elif self.date_type == 'time':
-            return now.strftime('%H:%M:%S')
+            return f"{hour:02d}:{minute:02d}:{second:02d}"
         elif self.date_type == 'duration':
-            return 'PT1H30M'  # 1 hour 30 minutes
+            return 'PT1H30M'  # 1 hour 30 minutes (fixed for determinism)
         else:  # datetime or invalid type - default to datetime with Z
-            return now.strftime('%Y-%m-%dT%H:%M:%SZ')
+            return f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}Z"
     
     def get_type_name(self) -> str:
         return self.date_type
@@ -208,9 +267,10 @@ class IDTypeGenerator(BaseTypeGenerator):
         elif not clean_name or clean_name[0] not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_':
             clean_name = 'ID_' + clean_name
         
-        # Add unique suffix to ensure uniqueness
-        unique_suffix = random.randint(1000, 9999)
-        return f"{clean_name}_{unique_suffix}"
+        # Add deterministic suffix based on element name
+        element_hash = hashlib.md5(element_name.encode('utf-8')).hexdigest()
+        unique_suffix = int(element_hash[:4], 16) % 10000
+        return f"{clean_name}_{unique_suffix:04d}"
     
     def get_type_name(self) -> str:
         return 'ID'
@@ -259,35 +319,52 @@ class Base64BinaryTypeGenerator(BaseTypeGenerator):
 class StringTypeGenerator(BaseTypeGenerator):
     """Generator for string types with length and pattern constraints."""
     
-    # Comprehensive pattern library based on validation error analysis
-    AVIATION_PATTERNS = {
-        # Service and Reference Codes (highest frequency)
-        '[0-9A-Z]{1,3}': lambda: f"{random.randint(1,9)}{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(0,9)}",
-        '[0-9A-Z]{3}': lambda: f"{random.randint(0,9)}{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(0,9)}",
-        '[A-Z]{3}': lambda: ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3)),
-        '[A-Z]{2}': lambda: ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=2)),
+    # Deterministic pattern generators - no random values, consistent between runs
+    def _get_deterministic_patterns(self, element_name: str) -> Dict[str, str]:
+        """Get deterministic pattern values based on element name for consistent generation."""
+        # Create deterministic seed from element name
+        seed_hash = hashlib.md5(element_name.encode('utf-8')).hexdigest()
         
-        # Numeric Codes
-        '[0-9]{1,4}': lambda: str(random.randint(1, 9999)),
-        '[0-9]{1,8}': lambda: str(random.randint(1, 99999999)),
-        '[0-9]{2}': lambda: f"{random.randint(10, 99)}",
-        '[0-9]{3}': lambda: f"{random.randint(100, 999)}",
-        '[0-9]{4}': lambda: f"{random.randint(1000, 9999)}",
+        # Use hash to create deterministic character selections
+        def get_digit(index: int) -> str:
+            return str(int(seed_hash[index % len(seed_hash)], 16) % 10)
         
-        # Payment and Business Codes
-        '(IATAC|BLTRL)[A-Za-z0-9]{2}': lambda: f"IATAC{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(0,9)}",
-        '([0-9]{7}[A-Za-z0-9]{8})': lambda: f"{random.randint(1000000, 9999999)}{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=8))}",
+        def get_letter(index: int) -> str:
+            letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+            return letters[int(seed_hash[index % len(seed_hash)], 16) % len(letters)]
         
-        # Mixed Alphanumeric
-        '[A-Za-z0-9]{2}': lambda: f"{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(0,9)}",
-        '[A-Za-z0-9]{3}': lambda: ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=3)),
+        def get_alphanumeric(index: int) -> str:
+            chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+            return chars[int(seed_hash[index % len(seed_hash)], 16) % len(chars)]
         
-        # Common regex variants (normalized forms)
-        r'[A-Z]{3}': lambda: ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3)),
-        r'[0-9]+': lambda: str(random.randint(1, 9999)),
-        r'\d+': lambda: str(random.randint(1, 9999)),
-        r'[0-9A-Z]+': lambda: ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=3))
-    }
+        return {
+            # Service and Reference Codes (highest frequency) 
+            '[0-9A-Z]{1,3}': f"{get_digit(0)}{get_letter(1)}{get_digit(2)}"[:3],
+            '[0-9A-Z]{3}': f"{get_digit(0)}{get_letter(1)}{get_digit(2)}",
+            '[A-Z]{3}': f"{get_letter(0)}{get_letter(1)}{get_letter(2)}",
+            '[A-Z]{2}': f"{get_letter(0)}{get_letter(1)}",
+            
+            # Numeric Codes
+            '[0-9]{1,4}': f"{get_digit(0)}{get_digit(1)}{get_digit(2)}{get_digit(3)}"[:4].lstrip('0') or '1',
+            '[0-9]{1,8}': f"{get_digit(0)}{get_digit(1)}{get_digit(2)}{get_digit(3)}"[:4].lstrip('0') or '1',
+            '[0-9]{2}': f"{get_digit(0) if get_digit(0) != '0' else '1'}{get_digit(1)}",
+            '[0-9]{3}': f"{get_digit(0) if get_digit(0) != '0' else '1'}{get_digit(1)}{get_digit(2)}",
+            '[0-9]{4}': f"{get_digit(0) if get_digit(0) != '0' else '1'}{get_digit(1)}{get_digit(2)}{get_digit(3)}",
+            
+            # Payment and Business Codes
+            '(IATAC|BLTRL)[A-Za-z0-9]{2}': f"IATAC{get_letter(0)}{get_digit(0)}",
+            '([0-9]{7}[A-Za-z0-9]{8})': f"{get_digit(0)}{get_digit(1)}{get_digit(2)}{get_digit(3)}{get_digit(4)}{get_digit(5)}{get_digit(6)}{get_alphanumeric(0)}{get_alphanumeric(1)}{get_alphanumeric(2)}{get_alphanumeric(3)}{get_alphanumeric(4)}{get_alphanumeric(5)}{get_alphanumeric(6)}{get_alphanumeric(7)}",
+            
+            # Mixed Alphanumeric
+            '[A-Za-z0-9]{2}': f"{get_letter(0)}{get_digit(0)}",
+            '[A-Za-z0-9]{3}': f"{get_letter(0)}{get_digit(0)}{get_letter(1)}",
+            
+            # Common regex variants (normalized forms)
+            r'[A-Z]{3}': f"{get_letter(0)}{get_letter(1)}{get_letter(2)}",
+            r'[0-9]+': f"{get_digit(0)}{get_digit(1)}{get_digit(2)}{get_digit(3)}"[:4].lstrip('0') or '1',
+            r'\d+': f"{get_digit(0)}{get_digit(1)}{get_digit(2)}{get_digit(3)}"[:4].lstrip('0') or '1',
+            r'[0-9A-Z]+': f"{get_digit(0)}{get_letter(0)}{get_digit(1)}"
+        }
     
     def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
         """Generate string value respecting length constraints."""
@@ -306,50 +383,80 @@ class StringTypeGenerator(BaseTypeGenerator):
                 base_value = "SampleTxt"  # Shorter default
         
         # Apply constraints
-        return self.validate_constraints(base_value, constraints)
+        return self.validate_constraints(base_value, constraints, element_name)
     
-    def generate_pattern_value(self, pattern_str: str) -> str:
-        """Generate value for specific pattern using comprehensive library."""
-        if pattern_str in self.AVIATION_PATTERNS:
-            return self.AVIATION_PATTERNS[pattern_str]()
+    def generate_pattern_value(self, pattern_str: str, element_name: str = "") -> str:
+        """Generate deterministic value for specific pattern."""
+        # Get deterministic patterns based on element name
+        deterministic_patterns = self._get_deterministic_patterns(element_name or "default")
+        
+        if pattern_str in deterministic_patterns:
+            return deterministic_patterns[pattern_str]
         
         # Dynamic pattern generation for unhandled patterns
-        return self.generate_dynamic_pattern_value(pattern_str)
+        return self.generate_dynamic_pattern_value(pattern_str, element_name)
     
-    def generate_dynamic_pattern_value(self, pattern_str: str) -> str:
-        """Generate value for unknown patterns using regex analysis."""
+    def generate_dynamic_pattern_value(self, pattern_str: str, element_name: str = "") -> str:
+        """Generate deterministic value for unknown patterns using regex analysis."""
         try:
+            # Create deterministic seed from element name and pattern
+            seed_str = f"{element_name or 'default'}_{pattern_str}"
+            seed_hash = hashlib.md5(seed_str.encode('utf-8')).hexdigest()
+            
+            # Deterministic character generators
+            def get_digit(index: int) -> str:
+                return str(int(seed_hash[index % len(seed_hash)], 16) % 10)
+            
+            def get_letter(index: int) -> str:
+                letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                return letters[int(seed_hash[index % len(seed_hash)], 16) % len(letters)]
+            
+            def get_alphanumeric(index: int) -> str:
+                chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+                return chars[int(seed_hash[index % len(seed_hash)], 16) % len(chars)]
+            
             # Analyze pattern and generate appropriate value
             if re.match(r'\[0-9\]\{(\d+),?(\d+)?\}', pattern_str):
                 # Numeric range patterns like [0-9]{1,3}
                 match = re.match(r'\[0-9\]\{(\d+),?(\d+)?\}', pattern_str)
                 min_len = int(match.group(1))
                 max_len = int(match.group(2)) if match.group(2) else min_len
-                length = random.randint(min_len, max_len)
-                return ''.join([str(random.randint(0, 9)) for _ in range(length)])
+                # Use deterministic length selection
+                length_index = int(seed_hash[0], 16) % (max_len - min_len + 1)
+                length = min_len + length_index
+                result = ''.join([get_digit(i) for i in range(length)])
+                # Ensure no leading zeros for numeric patterns
+                return result.lstrip('0') or '1'
             
             elif re.match(r'\[A-Z\]\{(\d+),?(\d+)?\}', pattern_str):
                 # Alpha range patterns like [A-Z]{2,4}
                 match = re.match(r'\[A-Z\]\{(\d+),?(\d+)?\}', pattern_str)
                 min_len = int(match.group(1))
                 max_len = int(match.group(2)) if match.group(2) else min_len
-                length = random.randint(min_len, max_len)
-                return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=length))
+                # Use deterministic length selection
+                length_index = int(seed_hash[0], 16) % (max_len - min_len + 1)
+                length = min_len + length_index
+                return ''.join([get_letter(i) for i in range(length)])
             
             elif re.match(r'\[A-Za-z0-9\]\{(\d+),?(\d+)?\}', pattern_str):
                 # Mixed alphanumeric patterns
                 match = re.match(r'\[A-Za-z0-9\]\{(\d+),?(\d+)?\}', pattern_str)
                 min_len = int(match.group(1))
                 max_len = int(match.group(2)) if match.group(2) else min_len
-                length = random.randint(min_len, max_len)
-                return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', k=length))
+                # Use deterministic length selection
+                length_index = int(seed_hash[0], 16) % (max_len - min_len + 1)
+                length = min_len + length_index
+                return ''.join([get_alphanumeric(i) for i in range(length)])
             
-            # Default fallback for complex patterns
-            return "VAL123"
+            # Default fallback for complex patterns - deterministic based on element name
+            fallback_hash = int(seed_hash[:6], 16) % 1000
+            return f"VAL{fallback_hash:03d}"
             
         except Exception:
-            # If pattern analysis fails, return safe default
-            return "DEF123"
+            # If pattern analysis fails, return deterministic default based on element name
+            element_hash = hashlib.md5((element_name or "default").encode('utf-8')).hexdigest()
+            fallback_num = int(element_hash[:6], 16) % 1000
+            return f"DEF{fallback_num:03d}"
     
     def test_pattern_compliance(self, value: str, pattern_str: str) -> bool:
         """Test if generated value matches pattern."""
@@ -358,17 +465,19 @@ class StringTypeGenerator(BaseTypeGenerator):
         except re.error:
             return False
     
-    def validate_and_regenerate_pattern(self, value: str, pattern_str: str, max_attempts: int = 5) -> str:
+    def validate_and_regenerate_pattern(self, value: str, pattern_str: str, element_name: str = "", max_attempts: int = 5) -> str:
         """Validate pattern compliance and regenerate if needed."""
         for attempt in range(max_attempts):
             if self.test_pattern_compliance(value, pattern_str):
                 return value
             
             # Regenerate value using pattern-specific generator
-            value = self.generate_pattern_value(pattern_str)
+            value = self.generate_pattern_value(pattern_str, element_name)
         
-        # If all attempts fail, return a safe default that might work
-        return "123"  # Numeric fallback for most patterns
+        # If all attempts fail, return a deterministic default based on element name
+        element_hash = hashlib.md5((element_name or "default").encode('utf-8')).hexdigest()
+        fallback_num = int(element_hash[:3], 16) % 1000
+        return f"{fallback_num}"
     
     def get_type_name(self) -> str:
         return 'string'
@@ -376,15 +485,19 @@ class StringTypeGenerator(BaseTypeGenerator):
     def get_fallback_value(self) -> str:
         return "SampleText"
     
-    def validate_constraints(self, value: str, constraints: Optional[Dict] = None) -> str:
-        """Apply string constraints like length limits and patterns with enhanced validation."""
+    def validate_constraints(self, value: str, constraints: Optional[Dict] = None, element_name: str = "") -> str:
+        """Apply comprehensive string constraints including whitespace, length, and patterns."""
         if not constraints:
             return value
         
-        # First apply length constraints
+        # Apply whitespace handling first (preserve, replace, collapse)
+        if 'whitespace' in constraints:
+            value = self.apply_whitespace_handling(value, constraints['whitespace'])
+        
+        # Apply length constraints
         value = self.validate_length_constraints(value, constraints)
         
-        # Then apply pattern constraints with comprehensive validation
+        # Apply pattern constraints with comprehensive validation
         if 'pattern' in constraints:
             pattern = constraints['pattern']
             try:
@@ -392,12 +505,35 @@ class StringTypeGenerator(BaseTypeGenerator):
                 pattern_str = str(pattern) if pattern is not None else ""
                 if pattern_str:
                     # Use enhanced pattern validation and regeneration
-                    value = self.validate_and_regenerate_pattern(value, pattern_str)
+                    value = self.validate_and_regenerate_pattern(value, pattern_str, element_name)
             except re.error:
                 # Invalid regex pattern, skip pattern validation
                 pass
         
         return value
+    
+    def apply_whitespace_handling(self, value: str, whitespace_action: str) -> str:
+        """Apply XSD whitespace facet handling."""
+        try:
+            if whitespace_action == 'preserve':
+                # Preserve all whitespace as-is
+                return value
+            elif whitespace_action == 'replace':
+                # Replace tabs, newlines, and carriage returns with spaces
+                return value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+            elif whitespace_action == 'collapse':
+                # Replace tabs/newlines with spaces and collapse multiple spaces
+                replaced = value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+                # Collapse multiple spaces and strip leading/trailing
+                import re
+                collapsed = re.sub(r'\s+', ' ', replaced).strip()
+                return collapsed
+            else:
+                # Unknown whitespace action, return as-is
+                return value
+        except Exception:
+            # If whitespace handling fails, return original value
+            return value
     
     def validate_length_constraints(self, value: str, constraints: Dict) -> str:
         """Comprehensive length constraint validation with smart adjustments."""
@@ -405,6 +541,11 @@ class StringTypeGenerator(BaseTypeGenerator):
         # Exact length has highest priority
         if 'exact_length' in constraints:
             target_length = constraints['exact_length']
+            return self.adjust_to_exact_length(value, target_length)
+        
+        # Handle legacy 'length' constraint for backward compatibility
+        if 'length' in constraints:
+            target_length = constraints['length']
             return self.adjust_to_exact_length(value, target_length)
         
         # Apply min/max length constraints
@@ -474,15 +615,19 @@ class IDTypeGenerator(BaseTypeGenerator):
         import random
         import string
         
-        # Create a valid ID based on element name if available
+        # Create a deterministic ID based on element name
         if element_name:
             # Remove namespace prefix if present
             local_name = element_name.split(':')[-1] if ':' in element_name else element_name
-            # Create ID starting with letter and element name
-            base_id = f"ID_{local_name}_{random.randint(1, 9999)}"
+            # Create deterministic suffix
+            element_hash = hashlib.md5(element_name.encode('utf-8')).hexdigest()
+            suffix = int(element_hash[:4], 16) % 10000
+            base_id = f"ID_{local_name}_{suffix:04d}"
         else:
-            # Generic ID
-            base_id = f"ID_{random.randint(1, 9999)}"
+            # Generic deterministic ID
+            default_hash = hashlib.md5("default".encode('utf-8')).hexdigest()
+            suffix = int(default_hash[:4], 16) % 10000
+            base_id = f"ID_{suffix:04d}"
         
         # Ensure ID starts with letter and contains only valid characters
         valid_id = ''.join(c if c.isalnum() or c in '_-.' else '_' for c in base_id)
@@ -506,42 +651,92 @@ class Base64BinaryTypeGenerator(BaseTypeGenerator):
         import base64
         import random
         
-        # Create sample binary data based on element purpose
+        # Create deterministic sample binary data based on element purpose
+        element_hash = hashlib.md5((element_name or "sample").encode('utf-8')).hexdigest()
+        
         if element_name and any(term in element_name.lower() for term in ['signature', 'key', 'modulus', 'exponent']):
             # For cryptographic elements, generate longer base64 data
-            sample_data = f"CryptographicData_{element_name}_{random.randint(1000, 9999)}".encode('utf-8')
-            # Pad to make it longer for realistic crypto data
-            sample_data += b'0' * random.randint(50, 200)
+            suffix = int(element_hash[:4], 16) % 10000
+            sample_data = f"CryptographicData_{element_name}_{suffix:04d}".encode('utf-8')
+            # Deterministic padding based on hash
+            padding_length = 50 + (int(element_hash[4:6], 16) % 150)
+            sample_data += b'0' * padding_length
         else:
             # For general binary data
-            sample_data = f"BinaryData_{element_name or 'Sample'}_{random.randint(100, 999)}".encode('utf-8')
+            suffix = int(element_hash[:3], 16) % 1000
+            sample_data = f"BinaryData_{element_name or 'Sample'}_{suffix:03d}".encode('utf-8')
         
         # Encode as base64
         base64_value = base64.b64encode(sample_data).decode('ascii')
         
         # Apply length constraints if specified
         if constraints:
-            if 'max_length' in constraints:
-                max_len = constraints['max_length']
-                if len(base64_value) > max_len:
-                    # Truncate but ensure valid base64 (multiple of 4)
-                    truncated_len = (max_len // 4) * 4
-                    base64_value = base64_value[:truncated_len]
+            base64_value = self.validate_base64_constraints(base64_value, constraints)
+        
+        return base64_value
+    
+    def validate_base64_constraints(self, base64_value: str, constraints: Dict) -> str:
+        """Apply length constraints to base64 values while maintaining validity."""
+        
+        # Handle exact length constraint first
+        if 'exact_length' in constraints:
+            target_length = constraints['exact_length']
+            return self.adjust_base64_to_exact_length(base64_value, target_length)
+        
+        # Handle legacy 'length' constraint for backward compatibility
+        if 'length' in constraints:
+            target_length = constraints['length']
+            return self.adjust_base64_to_exact_length(base64_value, target_length)
+        
+        # Apply max length constraint
+        if 'max_length' in constraints:
+            max_len = constraints['max_length']
+            if len(base64_value) > max_len:
+                # Truncate but ensure valid base64 (multiple of 4)
+                truncated_len = (max_len // 4) * 4
+                base64_value = base64_value[:truncated_len]
+        
+        # Apply min length constraint
+        if 'min_length' in constraints:
+            min_len = constraints['min_length']
+            while len(base64_value) < min_len:
+                # Pad with additional base64 data
+                additional_data = b'PADDING' * ((min_len - len(base64_value)) // 8 + 1)
+                additional_b64 = base64.b64encode(additional_data).decode('ascii')
+                base64_value += additional_b64
+                if len(base64_value) > min_len:
+                    # Truncate to exact length (multiple of 4)
+                    target_len = (min_len // 4) * 4
+                    if target_len < min_len:
+                        target_len += 4  # Round up to next multiple of 4
+                    base64_value = base64_value[:target_len]
+                    break
+        
+        return base64_value
+    
+    def adjust_base64_to_exact_length(self, base64_value: str, target_length: int) -> str:
+        """Adjust base64 string to exact length while maintaining validity."""
+        current_length = len(base64_value)
+        
+        if current_length == target_length:
+            return base64_value
+        elif current_length > target_length:
+            # Truncate to target length, ensuring multiple of 4
+            truncated_len = (target_length // 4) * 4
+            return base64_value[:truncated_len]
+        else:
+            # Pad to reach target length
+            padding_needed = target_length - current_length
+            additional_data = b'X' * (padding_needed + 3)  # Extra bytes for encoding
+            additional_b64 = base64.b64encode(additional_data).decode('ascii')
+            extended_value = base64_value + additional_b64
             
-            if 'min_length' in constraints:
-                min_len = constraints['min_length']
-                while len(base64_value) < min_len:
-                    # Pad with additional base64 data
-                    additional_data = b'PADDING' * ((min_len - len(base64_value)) // 8 + 1)
-                    additional_b64 = base64.b64encode(additional_data).decode('ascii')
-                    base64_value += additional_b64
-                    if len(base64_value) > min_len:
-                        # Truncate to exact length (multiple of 4)
-                        target_len = (min_len // 4) * 4
-                        if target_len < min_len:
-                            target_len += 4  # Round up to next multiple of 4
-                        base64_value = base64_value[:target_len]
-                        break
+            # Truncate to exact target length (multiple of 4)
+            final_len = (target_length // 4) * 4
+            if final_len < target_length:
+                final_len += 4  # Round up to next multiple of 4
+            
+            return extended_value[:final_len]
         
         return base64_value
     

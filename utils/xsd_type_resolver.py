@@ -5,7 +5,7 @@ This module provides utilities for resolving XSD types to their primitive base t
 without relying on element names or heuristics. Works universally with any XSD schema.
 """
 
-from typing import Any, Optional, Dict, Tuple, Set
+from typing import Any, Optional, Dict, Tuple, Set, List
 import xmlschema
 from xmlschema.validators import XsdType, XsdAtomicBuiltin, XsdAtomicRestriction, XsdComplexType
 
@@ -150,40 +150,267 @@ class UniversalXSDTypeResolver:
         return 'xs:string'
     
     def _extract_restrictions(self, restricted_type: XsdAtomicRestriction) -> Dict[str, Any]:
-        """Extract constraint information from restricted types."""
+        """Extract comprehensive constraint information from restricted types."""
         constraints = {}
         
-        # Extract facets (restrictions) - enhanced enumeration extraction
+        # Extract facets (restrictions) - comprehensive facet extraction
         if hasattr(restricted_type, 'facets') and restricted_type.facets:
             for facet_name, facet in restricted_type.facets.items():
-                if facet_name == 'enumeration':
-                    # Handle enumeration facets properly
-                    if hasattr(facet, '__iter__'):
-                        constraints['enum_values'] = [str(val) for val in facet]
+                try:
+                    if facet_name == 'enumeration':
+                        # Handle enumeration facets with multiple extraction strategies
+                        constraints['enum_values'] = self._extract_enumeration_values(facet)
+                    elif facet_name == 'pattern':
+                        # Extract pattern constraints with validation
+                        constraints['pattern'] = self._extract_pattern_constraint(facet)
+                    elif facet_name == 'minLength':
+                        constraints['min_length'] = int(facet)
+                    elif facet_name == 'maxLength':
+                        constraints['max_length'] = int(facet)
+                    elif facet_name == 'length':
+                        constraints['exact_length'] = int(facet)  # Use exact_length for precise control
+                    elif facet_name == 'minInclusive':
+                        constraints['min_value'] = self._safe_numeric_conversion(facet)
+                    elif facet_name == 'maxInclusive':
+                        constraints['max_value'] = self._safe_numeric_conversion(facet)
+                    elif facet_name == 'minExclusive':
+                        constraints['min_value_exclusive'] = self._safe_numeric_conversion(facet)
+                    elif facet_name == 'maxExclusive':
+                        constraints['max_value_exclusive'] = self._safe_numeric_conversion(facet)
+                    elif facet_name == 'fractionDigits':
+                        constraints['fraction_digits'] = int(facet)
+                    elif facet_name == 'totalDigits':
+                        constraints['total_digits'] = int(facet)
+                    elif facet_name == 'whiteSpace':
+                        constraints['whitespace'] = str(facet)  # 'preserve', 'replace', 'collapse'
+                    # Handle additional XSD facets dynamically
                     else:
-                        constraints['enum_values'] = [str(facet)]
-                elif facet_name == 'pattern':
-                    constraints['pattern'] = str(facet)
-                elif facet_name == 'minLength':
-                    constraints['min_length'] = int(facet)
-                elif facet_name == 'maxLength':
-                    constraints['max_length'] = int(facet)
-                elif facet_name == 'length':
-                    constraints['length'] = int(facet)
-                elif facet_name == 'minInclusive':
-                    constraints['min_value'] = float(facet)
-                elif facet_name == 'maxInclusive':
-                    constraints['max_value'] = float(facet)
-                elif facet_name == 'fractionDigits':
-                    constraints['fraction_digits'] = int(facet)
-                elif facet_name == 'totalDigits':
-                    constraints['total_digits'] = int(facet)
+                        # Handle namespaced facet names
+                        local_facet_name = str(facet_name).split('}')[-1] if '}' in str(facet_name) else str(facet_name)
+                        
+                        if local_facet_name == 'pattern':
+                            # Handle pattern facet that wasn't caught above
+                            pattern = self._extract_pattern_constraint(facet)
+                            if pattern:
+                                constraints['pattern'] = pattern
+                        else:
+                            # Store unrecognized facets for potential future use
+                            constraints[f'facet_{local_facet_name}'] = str(facet)
+                except (ValueError, TypeError) as e:
+                    # Log but don't fail on individual facet extraction errors
+                    print(f"Warning: Failed to extract facet {facet_name}: {e}")
+                    continue
         
-        # Alternative enumeration extraction for xmlschema objects
-        if hasattr(restricted_type, 'enumeration') and restricted_type.enumeration:
-            constraints['enum_values'] = [str(val) for val in restricted_type.enumeration]
+        # Alternative enumeration extraction methods for robust enum handling
+        if not constraints.get('enum_values'):
+            if hasattr(restricted_type, 'enumeration') and restricted_type.enumeration:
+                constraints['enum_values'] = self._extract_enumeration_values(restricted_type.enumeration)
+        
+        # Extract additional constraints from xmlschema object properties
+        constraints.update(self._extract_additional_constraints(restricted_type))
         
         return constraints
+    
+    def _extract_enumeration_values(self, enum_facet) -> List[str]:
+        """Extract enumeration values using multiple strategies."""
+        enum_values = []
+        
+        try:
+            # Strategy 1: Direct iteration
+            if hasattr(enum_facet, '__iter__') and not isinstance(enum_facet, str):
+                for val in enum_facet:
+                    if val is not None and str(val).strip():
+                        enum_values.append(str(val).strip())
+            # Strategy 2: Single value
+            elif enum_facet is not None:
+                val_str = str(enum_facet).strip()
+                if val_str and val_str != 'None':
+                    enum_values.append(val_str)
+            
+            # Strategy 3: Check for value attribute
+            if not enum_values and hasattr(enum_facet, 'value'):
+                if hasattr(enum_facet.value, '__iter__') and not isinstance(enum_facet.value, str):
+                    enum_values = [str(val).strip() for val in enum_facet.value if val is not None and str(val).strip()]
+                else:
+                    val_str = str(enum_facet.value).strip()
+                    if val_str and val_str != 'None':
+                        enum_values = [val_str]
+        
+        except Exception as e:
+            print(f"Warning: Error extracting enumeration values: {e}")
+        
+        # Remove duplicates while preserving order
+        return list(dict.fromkeys(enum_values)) if enum_values else []
+    
+    def _extract_pattern_constraint(self, pattern_facet) -> Optional[str]:
+        """Extract pattern constraint with validation and XsdPatternFacets handling."""
+        try:
+            if pattern_facet is None:
+                return None
+            
+            # Handle XsdPatternFacets objects (they are list-like and contain patterns)
+            if hasattr(pattern_facet, '__class__') and 'XsdPatternFacets' in str(pattern_facet.__class__):
+                # Method 1: Use regexps attribute directly (most reliable)
+                if hasattr(pattern_facet, 'regexps') and pattern_facet.regexps:
+                    for pattern_str in pattern_facet.regexps:
+                        if pattern_str and pattern_str.strip():
+                            return self._validate_and_clean_pattern(pattern_str.strip())
+                
+                # Method 2: Iterate over Elements and extract from attrib
+                for pattern_element in pattern_facet:
+                    if pattern_element is not None:
+                        # Handle XML Element objects with 'value' attribute
+                        if hasattr(pattern_element, 'attrib') and 'value' in pattern_element.attrib:
+                            pattern_str = pattern_element.attrib['value']
+                            if pattern_str and pattern_str.strip():
+                                return self._validate_and_clean_pattern(pattern_str.strip())
+                        elif hasattr(pattern_element, 'get'):
+                            pattern_str = pattern_element.get('value')
+                            if pattern_str and pattern_str.strip():
+                                return self._validate_and_clean_pattern(pattern_str.strip())
+            
+            # Handle xmlschema Element objects (lxml elements)
+            if hasattr(pattern_facet, 'get') and hasattr(pattern_facet, 'text'):
+                # This is an XML Element - extract the value attribute or text content
+                if hasattr(pattern_facet, 'attrib') and 'value' in pattern_facet.attrib:
+                    pattern_str = pattern_facet.attrib['value']
+                    return self._validate_and_clean_pattern(pattern_str)
+                elif pattern_facet.text:
+                    pattern_str = pattern_facet.text
+                    return self._validate_and_clean_pattern(pattern_str)
+            
+            # Handle xmlschema facet objects with value attribute
+            if hasattr(pattern_facet, 'value') and pattern_facet.value is not None:
+                pattern_str = str(pattern_facet.value)
+                return self._validate_and_clean_pattern(pattern_str)
+            
+            # Handle other iterable objects
+            if hasattr(pattern_facet, '__iter__') and not isinstance(pattern_facet, str):
+                # This is likely a collection of patterns
+                for pattern in pattern_facet:
+                    if pattern is not None:
+                        # Recursively extract from each pattern in collection
+                        extracted = self._extract_pattern_constraint(pattern)
+                        if extracted:
+                            return extracted
+            
+            # Handle direct string representation
+            pattern_str = str(pattern_facet).strip()
+            if not pattern_str or pattern_str == 'None':
+                return None
+            
+            # Handle XsdPatternFacets string representation like "XsdPatternFacets(['[0-9A-Z]{3}'])"
+            if 'XsdPatternFacets' in pattern_str:
+                import re
+                # Extract pattern from XsdPatternFacets(['pattern']) format
+                pattern_match = re.search(r"XsdPatternFacets\(\['([^']+)'\]", pattern_str)
+                if pattern_match:
+                    pattern_str = pattern_match.group(1)
+                    return self._validate_and_clean_pattern(pattern_str)
+                else:
+                    # Try alternate format: XsdPatternFacets([pattern])
+                    pattern_match = re.search(r"XsdPatternFacets\(\[([^\]]+)\]", pattern_str)
+                    if pattern_match:
+                        pattern_str = pattern_match.group(1).strip("'\"")
+                        return self._validate_and_clean_pattern(pattern_str)
+            
+            # Skip XML Element object representations
+            if '<Element ' in pattern_str and ' at 0x' in pattern_str:
+                return None  # This is just the object representation, not useful
+            
+            return self._validate_and_clean_pattern(pattern_str)
+                
+        except Exception as e:
+            print(f"Warning: Error extracting pattern constraint: {e}")
+            return None
+    
+    def _validate_and_clean_pattern(self, pattern_str: str) -> Optional[str]:
+        """Validate and clean a pattern string."""
+        if not pattern_str or pattern_str == 'None':
+            return None
+        
+        # Clean up the pattern string
+        pattern_str = pattern_str.strip()
+        
+        # Validate pattern by attempting to compile it
+        import re
+        try:
+            re.compile(pattern_str)
+            return pattern_str
+        except re.error:
+            print(f"Warning: Invalid regex pattern detected: {pattern_str}")
+            return pattern_str  # Return it anyway, might be usable
+    
+    def _safe_numeric_conversion(self, value) -> float:
+        """Safely convert value to numeric type."""
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+            elif isinstance(value, str):
+                return float(value.strip())
+            else:
+                return float(str(value))
+        except (ValueError, TypeError):
+            return 0.0
+    
+    def _extract_additional_constraints(self, restricted_type) -> Dict[str, Any]:
+        """Extract additional constraints from xmlschema object properties."""
+        additional_constraints = {}
+        
+        try:
+            # Check for validators or restrictions attribute
+            if hasattr(restricted_type, 'validators'):
+                for validator in restricted_type.validators:
+                    validator_type = type(validator).__name__
+                    if 'Pattern' in validator_type:
+                        if hasattr(validator, 'pattern'):
+                            pattern = self._extract_pattern_constraint(validator.pattern)
+                            if pattern:
+                                additional_constraints['pattern'] = pattern
+                    elif 'Length' in validator_type:
+                        if hasattr(validator, 'value'):
+                            if 'MinLength' in validator_type:
+                                additional_constraints['min_length'] = int(validator.value)
+                            elif 'MaxLength' in validator_type:
+                                additional_constraints['max_length'] = int(validator.value)
+                            elif validator_type == 'XsdLengthFacet':
+                                additional_constraints['exact_length'] = int(validator.value)
+                    elif 'Digits' in validator_type:
+                        if hasattr(validator, 'value'):
+                            if 'Fraction' in validator_type:
+                                additional_constraints['fraction_digits'] = int(validator.value)
+                            elif 'Total' in validator_type:
+                                additional_constraints['total_digits'] = int(validator.value)
+                    elif 'Inclusive' in validator_type or 'Exclusive' in validator_type:
+                        if hasattr(validator, 'value'):
+                            numeric_value = self._safe_numeric_conversion(validator.value)
+                            if 'MinInclusive' in validator_type:
+                                additional_constraints['min_value'] = numeric_value
+                            elif 'MaxInclusive' in validator_type:
+                                additional_constraints['max_value'] = numeric_value
+                            elif 'MinExclusive' in validator_type:
+                                additional_constraints['min_value_exclusive'] = numeric_value
+                            elif 'MaxExclusive' in validator_type:
+                                additional_constraints['max_value_exclusive'] = numeric_value
+            
+            # Check for direct attributes on the restricted type
+            for attr_name in ['min_length', 'max_length', 'length', 'pattern']:
+                if hasattr(restricted_type, attr_name):
+                    attr_value = getattr(restricted_type, attr_name)
+                    if attr_value is not None:
+                        if attr_name == 'length':
+                            additional_constraints['exact_length'] = int(attr_value)
+                        elif attr_name == 'pattern':
+                            pattern = self._extract_pattern_constraint(attr_value)
+                            if pattern:
+                                additional_constraints['pattern'] = pattern
+                        else:
+                            additional_constraints[attr_name] = int(attr_value)
+                            
+        except Exception as e:
+            print(f"Warning: Error extracting additional constraints: {e}")
+        
+        return additional_constraints
     
     def get_element_primitive_type(self, element_name: str) -> Tuple[str, Dict[str, Any]]:
         """
@@ -208,56 +435,70 @@ class UniversalXSDTypeResolver:
         if type_obj:
             return self.resolve_to_primitive_type(type_obj)
         
-        # Method 3: Search in imported schemas
-        element = self._find_element_in_imports(element_name)
-        if element:
-            return self.resolve_to_primitive_type(element.type)
-        
         return 'xs:string', {}
     
     def _find_element_direct(self, element_name: str):
-        """Find element directly in main schema."""
-        if not hasattr(self.schema, 'elements'):
+        """Find element directly in main schema and all imported schemas."""
+        # Search in main schema first
+        element = self._search_elements_in_schema(self.schema, element_name)
+        if element:
+            return element
+        
+        # Search in all imported schemas
+        if hasattr(self.schema, 'imports') and self.schema.imports:
+            for imported_schema in self.schema.imports.values():
+                element = self._search_elements_in_schema(imported_schema, element_name)
+                if element:
+                    return element
+        
+        return None
+    
+    def _search_elements_in_schema(self, schema, element_name: str):
+        """Search for element in a specific schema."""
+        if not hasattr(schema, 'elements'):
             return None
             
         # Direct name match
-        for elem_name, elem_obj in self.schema.elements.items():
+        for elem_name, elem_obj in schema.elements.items():
             local_name = str(elem_name).split('}')[-1] if '}' in str(elem_name) else str(elem_name)
             if local_name == element_name:
                 return elem_obj
         
         # Partial match
-        for elem_name, elem_obj in self.schema.elements.items():
+        for elem_name, elem_obj in schema.elements.items():
             if element_name in str(elem_name):
                 return elem_obj
         
         return None
     
     def _find_type_by_name(self, type_name: str):
-        """Find type definition by name."""
-        if not hasattr(self.schema, 'types'):
+        """Find type definition by name in main schema and all imported schemas."""
+        # Search in main schema first
+        type_obj = self._search_types_in_schema(self.schema, type_name)
+        if type_obj:
+            return type_obj
+        
+        # Search in all imported schemas
+        if hasattr(self.schema, 'imports') and self.schema.imports:
+            for imported_schema in self.schema.imports.values():
+                type_obj = self._search_types_in_schema(imported_schema, type_name)
+                if type_obj:
+                    return type_obj
+        
+        return None
+    
+    def _search_types_in_schema(self, schema, type_name: str):
+        """Search for type definition in a specific schema."""
+        if not hasattr(schema, 'types'):
             return None
             
-        for type_name_key, type_obj in self.schema.types.items():
+        for type_name_key, type_obj in schema.types.items():
             local_name = str(type_name_key).split('}')[-1] if '}' in str(type_name_key) else str(type_name_key)
             if local_name == type_name or type_name in local_name:
                 return type_obj
         
         return None
     
-    def _find_element_in_imports(self, element_name: str):
-        """Search for element in imported schemas."""
-        if not hasattr(self.schema, 'imports') or not self.schema.imports:
-            return None
-        
-        for imported_schema in self.schema.imports.values():
-            if hasattr(imported_schema, 'elements'):
-                for elem_name, elem_obj in imported_schema.elements.items():
-                    local_name = str(elem_name).split('}')[-1] if '}' in str(elem_name) else str(elem_name)
-                    if local_name == element_name:
-                        return elem_obj
-        
-        return None
     
     def get_type_primitive_type(self, type_name: str) -> Tuple[str, Dict[str, Any]]:
         """
