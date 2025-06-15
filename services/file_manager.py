@@ -44,6 +44,7 @@ class FileManager:
             
             if source_dir and os.path.exists(source_dir):
                 print(f"Looking for dependencies in: {source_dir}")
+                print(f"Copying to temp directory: {temp_dir}")
                 
                 # Copy all XSD files from source directory except the main file
                 for filename in os.listdir(source_dir):
@@ -51,6 +52,11 @@ class FileManager:
                         try:
                             src_path = os.path.join(source_dir, filename)
                             dst_path = os.path.join(temp_dir, filename)
+                            
+                            # Skip copying if source and destination are the same
+                            if os.path.abspath(src_path) == os.path.abspath(dst_path):
+                                print(f"Skipping {filename}: source and destination are the same")
+                                continue
                             
                             if os.path.exists(src_path) and os.path.isfile(src_path):
                                 with open(src_path, 'rb') as src_file:

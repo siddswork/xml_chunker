@@ -42,7 +42,7 @@ class BaseTypeGenerator(ABC):
         """Return a safe fallback value."""
         pass
     
-    def validate_constraints(self, value: Any, constraints: Optional[Dict] = None) -> Any:
+    def validate_constraints(self, value: Any, constraints: Optional[Dict] = None, element_name: str = "") -> Any:
         """Validate and adjust value based on constraints."""
         return value
 
@@ -81,7 +81,7 @@ class NumericTypeGenerator(BaseTypeGenerator):
             self.is_decimal = False
         
         # Apply constraints
-        value = self.validate_constraints(base_value, constraints)
+        value = self.validate_constraints(base_value, constraints, element_name)
         
         # Ensure proper type conversion and no empty values
         try:
@@ -102,7 +102,7 @@ class NumericTypeGenerator(BaseTypeGenerator):
     def get_fallback_value(self) -> Any:
         return 0.0 if self.is_decimal else 0
     
-    def validate_constraints(self, value: Any, constraints: Optional[Dict] = None) -> Any:
+    def validate_constraints(self, value: Any, constraints: Optional[Dict] = None, element_name: str = "") -> Any:
         """Apply comprehensive numeric constraints including precision and range."""
         if not constraints:
             return value
