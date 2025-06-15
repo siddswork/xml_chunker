@@ -59,9 +59,16 @@ class NumericTypeGenerator(BaseTypeGenerator):
         """Generate numeric value ensuring no empty strings and proper integer format."""
         # Get base value from config or default
         if self.config and element_name:
-            base_value = self.config.get_data_pattern(element_name, 'int')
+            if self.is_decimal:
+                base_value = self.config.get_data_pattern(element_name, 'decimal')
+            else:
+                base_value = self.config.get_data_pattern(element_name, 'int')
         else:
-            base_value = 100 if self.is_decimal else 100
+            base_value = 100.0 if self.is_decimal else 100
+        
+        # Ensure we never get empty/invalid values from config
+        if base_value is None or (isinstance(base_value, str) and not base_value.strip()):
+            base_value = 100.0 if self.is_decimal else 100
         
         # Handle amount-specific elements with realistic values
         if element_name and any(term in element_name.lower() for term in ['amount', 'price', 'cost', 'fee']):
@@ -77,11 +84,17 @@ class NumericTypeGenerator(BaseTypeGenerator):
         value = self.validate_constraints(base_value, constraints)
         
         # Ensure proper type conversion and no empty values
-        if self.is_integer or (not self.is_decimal):
-            # Force integer return for integer types to prevent "123.0" format
-            return int(float(value)) if value is not None else 0
-        else:
-            return float(value) if value is not None else 0.0
+        try:
+            if self.is_integer or (not self.is_decimal):
+                # Force integer return for integer types to prevent "123.0" format
+                result = int(float(value)) if value is not None else 0
+                return result if result != 0 else 1  # Avoid zero values that might cause validation issues
+            else:
+                result = float(value) if value is not None else 0.0
+                return result if result != 0.0 else 1.0  # Avoid zero values that might cause validation issues
+        except (ValueError, TypeError):
+            # If conversion fails, return safe default
+            return 1 if (self.is_integer or not self.is_decimal) else 1.0
     
     def get_type_name(self) -> str:
         return 'decimal' if self.is_decimal else 'int'
@@ -141,7 +154,12 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
         if self.config:
             pattern_value = self.config.get_data_pattern(element_name or self.date_type, self.date_type)
             if pattern_value and pattern_value.strip():
-                return pattern_value
+                # Validate that duration patterns are actually valid ISO 8601 durations
+                if self.date_type == 'duration' and not self._is_valid_duration(pattern_value):
+                    # Fall through to generate valid duration
+                    pass
+                else:
+                    return pattern_value
         
         # Generate current timestamp as fallback
         now = datetime.now()
@@ -152,14 +170,25 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
             return now.strftime('%H:%M:%S')
         elif self.date_type == 'duration':
             return 'PT1H30M'  # 1 hour 30 minutes
-        else:  # datetime
-            return now.strftime('%Y-%m-%dT%H:%M:%S')
+        else:  # datetime or invalid type - default to datetime with Z
+            return now.strftime('%Y-%m-%dT%H:%M:%SZ')
     
     def get_type_name(self) -> str:
         return self.date_type
     
     def get_fallback_value(self) -> str:
         return '2024-06-08T12:00:00'
+    
+    def _is_valid_duration(self, value: str) -> bool:
+        """Check if value is a valid ISO 8601 duration format."""
+        if not value or not value.strip():
+            return False
+        
+        # ISO 8601 duration must start with P and contain valid components
+        import re
+        # Pattern for ISO 8601 duration: P[n]Y[n]M[n]DT[n]H[n]M[n]S or PT[n]H[n]M[n]S
+        duration_pattern = r'^P(?:\d+Y)?(?:\d+M)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?$'
+        return bool(re.match(duration_pattern, value.strip()))
 
 
 class IDTypeGenerator(BaseTypeGenerator):
@@ -704,12 +733,16 @@ class TypeGeneratorFactory:
             return EnumerationTypeGenerator(self.config, constraints['enum_values'])
         
         # Handle special XSD types by name inspection first
-        type_str = str(xsd_type_name).lower()
+        try:
+            type_str = str(xsd_type_name).lower()
+        except Exception:
+            # If string conversion fails early, skip string-based checks and use object introspection
+            type_str = ""
         
         # Check for specific XSD types that need special handling
-        if "'xs:id'" in type_str or ('xsdatomicbuiltin' in type_str and "'xs:id'" in type_str):
+        if type_str and ("'xs:id'" in type_str or ('xsdatomicbuiltin' in type_str and "'xs:id'" in type_str)):
             return IDTypeGenerator(self.config)
-        elif "'xs:base64binary'" in type_str or 'base64binary' in type_str:
+        elif type_str and ("'xs:base64binary'" in type_str or 'base64binary' in type_str):
             return Base64BinaryTypeGenerator(self.config)
         
         # Handle xmlschema type objects with proper introspection
@@ -755,11 +788,12 @@ class TypeGeneratorFactory:
                 return BooleanTypeGenerator(self.config)
         
         # String-based fallback detection
-        try:
-            type_str = str(xsd_type_name).lower()
-        except Exception:
-            # If string conversion fails, return string generator as fallback
-            return StringTypeGenerator(self.config)
+        if not type_str:  # If we didn't get a type string earlier
+            try:
+                type_str = str(xsd_type_name).lower()
+            except Exception:
+                # If string conversion fails, return string generator as fallback
+                return StringTypeGenerator(self.config)
         
         # Enhanced string-based type detection with more specific patterns
         if 'xsdatomicbuiltin' in type_str:

@@ -95,7 +95,8 @@ class DataGeneration:
                 'date': '2024-06-08',
                 'datetime': '2024-06-08T12:00:00Z',
                 'time': '12:00:00',
-                'timestamp': '2024-06-08T12:00:00.000Z'
+                'timestamp': '2024-06-08T12:00:00.000Z',
+                'duration': 'PT1H30M'  # ISO 8601 duration format
             }
 
 
@@ -269,15 +270,23 @@ class Config:
                     return value.format(element_name=element_name)
             return f"Sample{element_name}"
         
-        elif data_type in ['int', 'integer', 'number']:
+        elif data_type in ['int', 'integer', 'number', 'decimal', 'float', 'double']:
             for pattern, value in self.data_generation.numeric_patterns.items():
                 if pattern in element_name_lower:
+                    # Return appropriate numeric type
+                    if data_type in ['decimal', 'float', 'double']:
+                        return float(value) if 'amount' in pattern or 'price' in pattern else value
                     return value
+            # Return appropriate default based on type
+            if data_type in ['decimal', 'float', 'double']:
+                return 123.45
             return 123
         
-        elif data_type in ['date', 'datetime', 'time']:
+        elif data_type in ['date', 'datetime', 'time', 'duration']:
             # Check for specific element name patterns in priority order (most specific first)
-            if 'timestamp' in element_name_lower or 'datetime' in element_name_lower:
+            if data_type == 'duration':
+                return self.data_generation.date_patterns['duration']
+            elif 'timestamp' in element_name_lower or 'datetime' in element_name_lower:
                 return self.data_generation.date_patterns['datetime']
             elif data_type == 'datetime':
                 return self.data_generation.date_patterns['datetime']

@@ -15,6 +15,7 @@ from lxml import etree
 from collections import deque
 from config import get_config
 from .type_generators import TypeGeneratorFactory
+from .xsd_type_resolver import UniversalXSDTypeResolver
 
 
 class IterativeConstraintExtractor:
@@ -192,6 +193,7 @@ class XMLGenerator:
         self.config = config_instance or get_config()
         self.type_factory = TypeGeneratorFactory(self.config)  # Initialize type generator factory
         self.constraint_extractor = None  # Will be initialized after schema loading
+        self.type_resolver = None  # Universal XSD type resolver
         self._load_schema()
     
     def _load_schema(self) -> None:
@@ -248,6 +250,9 @@ class XMLGenerator:
             
             # Initialize iterative constraint extractor with loaded schema
             self.constraint_extractor = IterativeConstraintExtractor(self.schema)
+            
+            # Initialize universal type resolver for proper type resolution
+            self.type_resolver = UniversalXSDTypeResolver(self.schema)
                 
         except xmlschema.XMLSchemaException as e:
             raise ValueError(f"Invalid XSD schema: {e}")
@@ -266,7 +271,20 @@ class XMLGenerator:
     
     
     def _generate_value_for_type(self, type_name, element_name: str = "") -> Any:
-        """Generate validation-compliant value using modular type generators."""
+        """Generate validation-compliant value using universal type resolution."""
+        if not self.type_resolver:
+            # Fallback to original method if type resolver not available
+            return self._generate_value_for_type_fallback(type_name, element_name)
+        
+        # Use universal type resolver to get primitive type
+        primitive_type, constraints = self.type_resolver.resolve_to_primitive_type(type_name)
+        
+        # Create appropriate type generator based on resolved primitive type
+        generator = self._create_generator_from_primitive_type(primitive_type, constraints)
+        return generator.generate(element_name, constraints)
+    
+    def _generate_value_for_type_fallback(self, type_name, element_name: str = "") -> Any:
+        """Fallback method using original type factory (for compatibility)."""
         # Extract constraints from the type
         constraints = self._extract_type_constraints(type_name)
         
@@ -286,6 +304,41 @@ class XMLGenerator:
         # Create appropriate type generator and generate value
         generator = self.type_factory.create_generator(type_name, constraints)
         return generator.generate(element_name, constraints)
+    
+    def _create_generator_from_primitive_type(self, primitive_type: str, constraints: Dict[str, Any]):
+        """Create type generator based on resolved primitive type."""
+        from .type_generators import (
+            NumericTypeGenerator, StringTypeGenerator, BooleanTypeGenerator, 
+            DateTimeTypeGenerator, EnumerationTypeGenerator, IDTypeGenerator,
+            Base64BinaryTypeGenerator
+        )
+        
+        # Handle enumerations first
+        if 'enum_values' in constraints:
+            return EnumerationTypeGenerator(self.config, constraints['enum_values'])
+        
+        # Map primitive types to generators
+        if primitive_type == 'xs:decimal' or primitive_type == 'xs:float' or primitive_type == 'xs:double':
+            return NumericTypeGenerator(self.config, is_decimal=True, is_integer=False)
+        elif primitive_type == 'xs:integer' or primitive_type == 'xs:int' or primitive_type == 'xs:long':
+            return NumericTypeGenerator(self.config, is_decimal=False, is_integer=True)
+        elif primitive_type == 'xs:boolean':
+            return BooleanTypeGenerator(self.config)
+        elif primitive_type == 'xs:dateTime':
+            return DateTimeTypeGenerator(self.config, 'datetime')
+        elif primitive_type == 'xs:date':
+            return DateTimeTypeGenerator(self.config, 'date')
+        elif primitive_type == 'xs:time':
+            return DateTimeTypeGenerator(self.config, 'time')
+        elif primitive_type == 'xs:duration':
+            return DateTimeTypeGenerator(self.config, 'duration')
+        elif primitive_type == 'xs:ID':
+            return IDTypeGenerator(self.config)
+        elif primitive_type == 'xs:base64Binary':
+            return Base64BinaryTypeGenerator(self.config)
+        else:
+            # Default to string for unknown types
+            return StringTypeGenerator(self.config)
     
     def _extract_type_constraints(self, type_name) -> Dict[str, Any]:
         """Extract validation constraints using iterative approach (no recursion)."""
@@ -689,14 +742,17 @@ class XMLGenerator:
         
         # CRITICAL: Ensure complex simple content never has empty values
         if base_value is None or base_value == "":
-            # Apply same fallback logic as for simple types
-            element_lower = element.local_name.lower()
-            if any(keyword in element_lower for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
-                base_value = "99.99"  # Use string for XML text content
-            elif any(keyword in element_lower for keyword in ['count', 'number', 'quantity']):
-                base_value = "1"
-            elif any(keyword in element_lower for keyword in ['code', 'type', 'status']):
-                base_value = "ABC"
+            # Use type-aware fallback instead of name-based guessing
+            if element.type and element.type.content and self.type_resolver:
+                primitive_type, _ = self.type_resolver.resolve_to_primitive_type(element.type.content)
+                if primitive_type.startswith('xs:decimal') or primitive_type.startswith('xs:float'):
+                    base_value = "123.45"
+                elif primitive_type.startswith('xs:int'):
+                    base_value = "123"
+                elif primitive_type.startswith('xs:boolean'):
+                    base_value = "true"
+                else:
+                    base_value = "SampleValue"
             else:
                 base_value = "SampleValue"
         
@@ -956,22 +1012,20 @@ class XMLGenerator:
             # Process simple types
             if element.type.is_simple():
                 value = self._generate_value_for_type(element.type, element.local_name)
-                # Ensure no elements return empty values - provide appropriate fallbacks
+                # Ensure no elements return empty values - use type-aware fallbacks
                 if value is None or value == "":
-                    # Numeric elements fallback
-                    if any(keyword in element.local_name.lower() for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
-                        return 0.0
-                    # Boolean elements fallback
-                    elif any(keyword in element.local_name.lower() for keyword in ['ind', 'flag', 'enable', 'allow']):
-                        return 'true'
-                    # Enumeration-like elements fallback
-                    elif any(keyword in element.local_name.lower() for keyword in ['code', 'type', 'status']):
-                        # Use enumeration-specific fallback generator
-                        return self._generate_fallback_for_empty_element(element.local_name, None)
-                    # Date/time elements fallback
-                    elif any(keyword in element.local_name.lower() for keyword in ['date', 'time']):
-                        return '2024-06-08T12:00:00Z'
-                    # General string fallback
+                    if self.type_resolver and element.type:
+                        primitive_type, _ = self.type_resolver.resolve_to_primitive_type(element.type)
+                        if primitive_type.startswith('xs:decimal') or primitive_type.startswith('xs:float'):
+                            return 123.45
+                        elif primitive_type.startswith('xs:int'):
+                            return 123
+                        elif primitive_type.startswith('xs:boolean'):
+                            return 'true'
+                        elif primitive_type.startswith('xs:date'):
+                            return '2024-06-08T12:00:00Z'
+                        else:
+                            return f"Sample{element.local_name}"
                     else:
                         return f"Sample{element.local_name}"
                 return value
@@ -984,16 +1038,25 @@ class XMLGenerator:
                         if attr.type is not None:
                             result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name)
                 
-                # CRITICAL: Special handling for Amount-like elements (complex type with decimal content + attributes)
-                if (element.local_name == 'Amount' or 
-                    (hasattr(element.type, 'attributes') and 'CurCode' in element.type.attributes)):
+                # CRITICAL: Special handling for complex types with simple content (like Amount)
+                if (hasattr(element.type, 'content') and element.type.content and 
+                    hasattr(element.type.content, 'is_simple') and element.type.content.is_simple()):
                     
-                    # Force handling as complex simple content for Amount elements
-                    base_value = self._generate_value_for_type(element.type.content if hasattr(element.type, 'content') else None, element.local_name)
+                    # Generate value using type resolution for the content
+                    base_value = self._generate_value_for_type(element.type.content, element.local_name)
                     
-                    # Apply fallback if base_value is empty
+                    # Apply type-aware fallback if base_value is empty
                     if base_value is None or base_value == "":
-                        base_value = "99.99"  # Default decimal value for Amount
+                        if self.type_resolver:
+                            primitive_type, _ = self.type_resolver.resolve_to_primitive_type(element.type.content)
+                            if primitive_type.startswith('xs:decimal') or primitive_type.startswith('xs:float'):
+                                base_value = "99.99"
+                            elif primitive_type.startswith('xs:int'):
+                                base_value = "123"
+                            else:
+                                base_value = "SampleValue"
+                        else:
+                            base_value = "99.99"  # Conservative fallback
                     
                     if result:  # Has attributes
                         result['_text'] = str(base_value)

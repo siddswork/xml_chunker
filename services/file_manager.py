@@ -24,13 +24,14 @@ class FileManager:
         """
         self.config = config_instance or get_config()
     
-    def setup_temp_directory_with_dependencies(self, xsd_file_path: str, xsd_file_name: str) -> None:
+    def setup_temp_directory_with_dependencies(self, xsd_file_path: str, xsd_file_name: str, source_xsd_path: str = None) -> None:
         """
-        Set up temporary directory with XSD dependencies.
+        Set up temporary directory with XSD dependencies from the same directory as the source XSD.
         
         Args:
-            xsd_file_path: Path to the XSD file
+            xsd_file_path: Path to the XSD file in temp directory
             xsd_file_name: Original name of the XSD file
+            source_xsd_path: Optional path to the original XSD file location
         """
         try:
             temp_dir = os.path.dirname(xsd_file_path)
@@ -38,8 +39,8 @@ class FileManager:
                 print(f"Warning: Temp directory not found: {temp_dir}")
                 return
             
-            # Find the source directory of the uploaded XSD file
-            source_dir = self._find_source_directory(xsd_file_path, xsd_file_name)
+            # Find the source directory containing the original XSD file
+            source_dir = self._find_source_directory(xsd_file_name, source_xsd_path)
             
             if source_dir and os.path.exists(source_dir):
                 print(f"Looking for dependencies in: {source_dir}")
@@ -64,22 +65,23 @@ class FileManager:
         except Exception as e:
             print(f"Warning: Error setting up dependencies: {e}")
     
-    def _find_source_directory(self, xsd_file_path: str, xsd_file_name: str) -> Optional[str]:
+    def _find_source_directory(self, xsd_file_name: str, source_xsd_path: str = None) -> Optional[str]:
         """
         Find the source directory containing the XSD file and its dependencies.
         
         Args:
-            xsd_file_path: Path to the XSD file (might be in temp directory)
             xsd_file_name: Name of the XSD file
+            source_xsd_path: Optional path to the original XSD file location
             
         Returns:
             Path to the source directory containing dependencies, or None if not found
         """
-        # If the XSD file path is a temp file, we need to find the original location
-        # Start from the current working directory and look for the file
-        current_dir = os.getcwd()
+        # If we have the source path, use its directory
+        if source_xsd_path and os.path.exists(source_xsd_path):
+            return os.path.dirname(source_xsd_path)
         
-        # Look for the file in current directory and all subdirectories
+        # Otherwise, search in current working directory and subdirectories
+        current_dir = os.getcwd()
         for root, dirs, files in os.walk(current_dir):
             if xsd_file_name in files:
                 return root
@@ -143,13 +145,14 @@ class FileManager:
         except Exception as e:
             print(f"Warning: Could not clean up temporary directory {dir_path}: {e}")
     
-    def write_temp_xsd_with_dependencies(self, xsd_content: str, xsd_filename: str) -> tuple[str, str]:
+    def write_temp_xsd_with_dependencies(self, xsd_content: str, xsd_filename: str, source_xsd_path: str = None) -> tuple[str, str]:
         """
         Write XSD content to a temporary file and set up dependencies.
         
         Args:
             xsd_content: XSD file content
             xsd_filename: Original XSD filename
+            source_xsd_path: Optional path to the original XSD file location
             
         Returns:
             Tuple of (temp_xsd_path, temp_dir_path)
@@ -162,6 +165,6 @@ class FileManager:
             f.write(xsd_content)
         
         # Set up dependencies
-        self.setup_temp_directory_with_dependencies(temp_xsd_path, xsd_filename)
+        self.setup_temp_directory_with_dependencies(temp_xsd_path, xsd_filename, source_xsd_path)
         
         return temp_xsd_path, temp_dir
