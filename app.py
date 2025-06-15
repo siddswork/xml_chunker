@@ -568,13 +568,21 @@ def render_unbounded_elements(unbounded_elements):
     
     for elem in unbounded_elements:
         max_display = elem['max_occurs'] if elem['max_occurs'] != 'unbounded' else '∞'
+        
+        # Create a more readable path display similar to choice elements
+        if 'path' in elem and elem['path'] and '.' in elem['path']:
+            path_display = elem['path'].replace('.', ' → ')
+            element_label = f"**{elem['name']}** at `{path_display}` (max: {max_display}):"
+        else:
+            element_label = f"**{elem['name']}** (max: {max_display}):"
+        
         count = st.number_input(
-            f"**{elem['name']}** (max: {max_display}):",
+            element_label,
             min_value=1,
             max_value=config.elements.max_unbounded_count if elem['max_occurs'] == 'unbounded' else min(config.elements.max_unbounded_count, int(elem['max_occurs'])),
             value=config.elements.default_element_count,
             key=f"count_{elem['path']}",
-            help=f"Number of {elem['name']} elements to generate"
+            help=f"Number of {elem['name']} elements to generate at path: {elem.get('path', 'root')}"
         )
         unbounded_counts[elem['path']] = count
     
