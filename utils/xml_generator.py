@@ -287,6 +287,19 @@ class XMLGenerator:
             if type_name is not None:
                 self._enhance_enumeration_constraints(type_name, constraints)
         
+        # Special handling for known IDREF elements that might be misresolved
+        if element_name:
+            element_lower = element_name.lower()
+            if 'reftids' in element_lower or 'refids' in element_lower:
+                primitive_type = 'xs:IDREFS'
+            elif element_lower.endswith('idref') or 'idref' in element_lower:
+                primitive_type = 'xs:IDREF'
+            elif element_lower == 'tid' and primitive_type == 'xs:string':
+                # Check if this should be an ID based on context
+                type_str = str(type_name).lower() if type_name else ''
+                if any(keyword in type_str for keyword in ['nmtoken', 'id']):
+                    primitive_type = 'xs:ID'
+        
         # Create appropriate type generator based on resolved primitive type
         generator = self._create_generator_from_primitive_type(primitive_type, constraints)
         return generator.generate(element_name, constraints)
@@ -342,7 +355,7 @@ class XMLGenerator:
                         break
         
         # Create appropriate type generator and generate value
-        generator = self.type_factory.create_generator(type_name, constraints)
+        generator = self.type_factory.create_generator(type_name, constraints, element_name)
         return generator.generate(element_name, constraints)
     
     def _create_generator_from_primitive_type(self, primitive_type: str, constraints: Dict[str, Any]):
@@ -350,7 +363,7 @@ class XMLGenerator:
         from .type_generators import (
             NumericTypeGenerator, StringTypeGenerator, BooleanTypeGenerator, 
             DateTimeTypeGenerator, EnumerationTypeGenerator, IDTypeGenerator,
-            Base64BinaryTypeGenerator
+            Base64BinaryTypeGenerator, IDREFTypeGenerator, IDREFSTypeGenerator
         )
         
         # Handle enumerations first
@@ -360,7 +373,12 @@ class XMLGenerator:
         # Map primitive types to generators
         if primitive_type == 'xs:decimal' or primitive_type == 'xs:float' or primitive_type == 'xs:double':
             return NumericTypeGenerator(self.config, is_decimal=True, is_integer=False)
-        elif primitive_type == 'xs:integer' or primitive_type == 'xs:int' or primitive_type == 'xs:long':
+        elif (primitive_type == 'xs:integer' or primitive_type == 'xs:int' or primitive_type == 'xs:long' or
+              primitive_type == 'xs:nonNegativeInteger' or primitive_type == 'xs:positiveInteger' or 
+              primitive_type == 'xs:negativeInteger' or primitive_type == 'xs:nonPositiveInteger' or
+              primitive_type == 'xs:unsignedLong' or primitive_type == 'xs:unsignedInt' or 
+              primitive_type == 'xs:unsignedShort' or primitive_type == 'xs:unsignedByte' or
+              primitive_type == 'xs:short' or primitive_type == 'xs:byte'):
             return NumericTypeGenerator(self.config, is_decimal=False, is_integer=True)
         elif primitive_type == 'xs:boolean':
             return BooleanTypeGenerator(self.config)
@@ -374,6 +392,10 @@ class XMLGenerator:
             return DateTimeTypeGenerator(self.config, 'duration')
         elif primitive_type == 'xs:ID':
             return IDTypeGenerator(self.config)
+        elif primitive_type == 'xs:IDREFS':
+            return IDREFSTypeGenerator(self.config)
+        elif primitive_type == 'xs:IDREF':
+            return IDREFTypeGenerator(self.config)
         elif primitive_type == 'xs:base64Binary':
             return Base64BinaryTypeGenerator(self.config)
         else:
@@ -1046,7 +1068,7 @@ class XMLGenerator:
             # Handle null type
             if element.type is None:
                 # Use string generator for unknown types
-                string_gen = self.type_factory.create_generator("string", {})
+                string_gen = self.type_factory.create_generator("string", {}, element.local_name)
                 return string_gen.generate(element.local_name, {})
             
             # Process simple types
@@ -1131,7 +1153,7 @@ class XMLGenerator:
                 if any(keyword in element.local_name.lower() for keyword in ['amount', 'rate', 'measure', 'percent', 'price', 'cost', 'fee']):
                     # Try to generate a decimal value as fallback
                     try:
-                        decimal_gen = self.type_factory.create_generator("decimal", {})
+                        decimal_gen = self.type_factory.create_generator("decimal", {}, element.local_name)
                         return decimal_gen.generate(element.local_name, {})
                     except:
                         return 0.0  # Ultimate fallback
@@ -1204,7 +1226,7 @@ class XMLGenerator:
         """Process a single element without recursion."""
         # Handle null type
         if element.type is None:
-            string_gen = self.type_factory.create_generator("string", {})
+            string_gen = self.type_factory.create_generator("string", {}, element.local_name)
             return string_gen.generate(element.local_name, {})
         
         # Process simple types
@@ -1443,6 +1465,10 @@ class XMLGenerator:
         """Generate XML with comprehensive user options including generation mode and optional element selection."""
         if not self.schema:
             return '<?xml version="1.0" encoding="UTF-8"?><error>Failed to load schema</error>'
+        
+        # Reset ID counter to ensure unique IDs for this document
+        from utils.type_generators import IDTypeGenerator
+        IDTypeGenerator.reset_id_counter()
         
         # Store user preferences
         self.user_choices = selected_choices or {}

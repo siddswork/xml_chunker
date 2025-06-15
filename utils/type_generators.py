@@ -253,30 +253,173 @@ class DateTimeTypeGenerator(BaseTypeGenerator):
 class IDTypeGenerator(BaseTypeGenerator):
     """Generator for xs:ID type ensuring valid XML ID format."""
     
+    # Class-level counter to ensure document-wide ID uniqueness
+    _id_counter = 0
+    _generated_ids = set()
+    _all_generated_ids = []  # Keep track of order for IDREF references
+    
     def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
         """Generate valid XML ID - starts with letter/underscore, valid for XML."""
-        # XML IDs must start with letter or underscore, contain only valid characters
-        base_name = element_name if element_name else "ID"
+        # XML IDs must follow strict rules:
+        # 1. Start with letter (a-z, A-Z) or underscore (_)
+        # 2. Followed by letters, digits, hyphens (-), dots (.), underscores (_), or colons (:)
+        # 3. Be unique within the document
         
-        # Clean element name to make it ID-compliant
-        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name)
+        base_name = element_name if element_name else "DefaultID"
         
-        # Ensure it starts with letter or underscore
-        if clean_name and clean_name[0].isdigit():
-            clean_name = 'ID_' + clean_name
-        elif not clean_name or clean_name[0] not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_':
-            clean_name = 'ID_' + clean_name
+        # Clean element name to make it ID-compliant - only allow valid XML ID characters
+        clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', base_name)
         
-        # Add deterministic suffix based on element name
-        element_hash = hashlib.md5(element_name.encode('utf-8')).hexdigest()
-        unique_suffix = int(element_hash[:4], 16) % 10000
-        return f"{clean_name}_{unique_suffix:04d}"
+        # Ensure it starts with letter or underscore (not digit or other character)
+        if not clean_name or not clean_name[0].isalpha():
+            if clean_name and clean_name[0] == '_':
+                # Underscore start is valid
+                pass
+            else:
+                # Prepend with letter to make it valid
+                clean_name = 'id' + clean_name
+        
+        # Remove any leading/trailing underscores from cleaning and ensure no double underscores
+        clean_name = re.sub(r'_+', '_', clean_name).strip('_')
+        if not clean_name:
+            clean_name = 'id'
+        
+        # Generate unique ID using both deterministic component and global counter
+        while True:
+            # Increment counter for uniqueness
+            IDTypeGenerator._id_counter += 1
+            
+            # Create unique suffix combining element hash and counter
+            element_hash = hashlib.md5((element_name or "default").encode('utf-8')).hexdigest()
+            base_suffix = int(element_hash[:4], 16) % 10000  # Smaller base from element
+            unique_suffix = base_suffix + IDTypeGenerator._id_counter
+            
+            # Construct final ID ensuring it starts with letter
+            final_id = f"{clean_name}{unique_suffix}"
+            
+            # Check if this ID is unique
+            if final_id not in IDTypeGenerator._generated_ids:
+                IDTypeGenerator._generated_ids.add(final_id)
+                IDTypeGenerator._all_generated_ids.append(final_id)
+                break
+        
+        # Final validation - ensure it starts with letter
+        if not final_id[0].isalpha():
+            final_id = 'id' + final_id
+            
+        return final_id
     
     def get_type_name(self) -> str:
         return 'ID'
     
     def get_fallback_value(self) -> str:
         return 'ID_DefaultValue_1234'
+    
+    @classmethod
+    def reset_id_counter(cls):
+        """Reset the ID counter and generated IDs set for new document generation."""
+        cls._id_counter = 0
+        cls._generated_ids.clear()
+        cls._all_generated_ids.clear()
+    
+    @classmethod
+    def get_existing_ids(cls):
+        """Get list of all generated IDs for IDREF reference."""
+        return cls._all_generated_ids.copy()
+
+
+class IDREFTypeGenerator(BaseTypeGenerator):
+    """Generator for xs:IDREF type that references existing IDs in the document."""
+    
+    def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
+        """Generate valid IDREF that references an existing ID."""
+        existing_ids = IDTypeGenerator.get_existing_ids()
+        
+        # If we have existing IDs, reference one of them
+        if existing_ids:
+            # Use deterministic selection based on element name for consistency
+            element_hash = hashlib.md5((element_name or "default").encode('utf-8')).hexdigest()
+            index = int(element_hash[:4], 16) % len(existing_ids)
+            return existing_ids[index]
+        else:
+            # If no IDs exist yet, generate an ID that follows the expected pattern
+            # and add it to the ID tracker to ensure consistency
+            base_name = element_name.replace('Ref', '').replace('ref', '') if element_name else "DefaultID"
+            clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', base_name)
+            if not clean_name or not clean_name[0].isalpha():
+                clean_name = 'id' + clean_name
+            
+            # Generate an ID similar to how IDTypeGenerator does it
+            element_hash = hashlib.md5((element_name or "default").encode('utf-8')).hexdigest()
+            IDTypeGenerator._id_counter += 1
+            unique_suffix = IDTypeGenerator._id_counter + int(element_hash[:4], 16) % 10000
+            generated_id = f"{clean_name}{unique_suffix}"
+            
+            # Add to ID tracker for future references
+            if generated_id not in IDTypeGenerator._generated_ids:
+                IDTypeGenerator._generated_ids.add(generated_id)
+                IDTypeGenerator._all_generated_ids.append(generated_id)
+                
+            return generated_id
+    
+    def get_type_name(self) -> str:
+        return 'IDREF'
+    
+    def get_fallback_value(self) -> str:
+        return 'IDREFPlaceholder'
+
+
+class IDREFSTypeGenerator(BaseTypeGenerator):
+    """Generator for xs:IDREFS type that references multiple existing IDs."""
+    
+    def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
+        """Generate space-separated list of IDREFs."""
+        existing_ids = IDTypeGenerator.get_existing_ids()
+        
+        # If we have existing IDs, reference some of them
+        if existing_ids:
+            # Generate 1-3 references based on element name
+            element_hash = hashlib.md5((element_name or "default").encode('utf-8')).hexdigest()
+            count = (int(element_hash[:2], 16) % 3) + 1  # 1-3 references
+            
+            # Select IDs deterministically
+            selected_ids = []
+            for i in range(min(count, len(existing_ids))):
+                index = (int(element_hash[i*2:(i+1)*2], 16) % len(existing_ids))
+                if existing_ids[index] not in selected_ids:
+                    selected_ids.append(existing_ids[index])
+            
+            return ' '.join(selected_ids) if selected_ids else existing_ids[0]
+        else:
+            # Generate 1-2 IDs that follow the expected pattern and add them to ID tracker
+            base_name = element_name.replace('Ref', '').replace('ref', '') if element_name else "DefaultID"
+            clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', base_name)
+            if not clean_name or not clean_name[0].isalpha():
+                clean_name = 'id' + clean_name
+                
+            # Generate 1-2 ID references
+            element_hash = hashlib.md5((element_name or "default").encode('utf-8')).hexdigest()
+            count = (int(element_hash[:2], 16) % 2) + 1  # 1-2 references
+            
+            generated_ids = []
+            for i in range(count):
+                IDTypeGenerator._id_counter += 1
+                unique_suffix = IDTypeGenerator._id_counter + int(element_hash[i*2:(i+1)*2], 16) % 10000
+                generated_id = f"{clean_name}{unique_suffix}"
+                
+                # Add to ID tracker for future references
+                if generated_id not in IDTypeGenerator._generated_ids:
+                    IDTypeGenerator._generated_ids.add(generated_id)
+                    IDTypeGenerator._all_generated_ids.append(generated_id)
+                    generated_ids.append(generated_id)
+            
+            return ' '.join(generated_ids) if generated_ids else f"{clean_name}Placeholder"
+    
+    def get_type_name(self) -> str:
+        return 'IDREFS'
+    
+    def get_fallback_value(self) -> str:
+        return 'IDREFSPlaceholder'
 
 
 class Base64BinaryTypeGenerator(BaseTypeGenerator):
@@ -606,42 +749,6 @@ class StringTypeGenerator(BaseTypeGenerator):
             return value + ('X' * padding_needed)
 
 
-class IDTypeGenerator(BaseTypeGenerator):
-    """Generator for xs:ID types ensuring valid XML ID format."""
-    
-    def generate(self, element_name: str = "", constraints: Optional[Dict] = None) -> str:
-        """Generate valid XML ID values that start with letter/underscore."""
-        # XML ID must start with letter or underscore, followed by letters, digits, hyphens, dots, underscores
-        import random
-        import string
-        
-        # Create a deterministic ID based on element name
-        if element_name:
-            # Remove namespace prefix if present
-            local_name = element_name.split(':')[-1] if ':' in element_name else element_name
-            # Create deterministic suffix
-            element_hash = hashlib.md5(element_name.encode('utf-8')).hexdigest()
-            suffix = int(element_hash[:4], 16) % 10000
-            base_id = f"ID_{local_name}_{suffix:04d}"
-        else:
-            # Generic deterministic ID
-            default_hash = hashlib.md5("default".encode('utf-8')).hexdigest()
-            suffix = int(default_hash[:4], 16) % 10000
-            base_id = f"ID_{suffix:04d}"
-        
-        # Ensure ID starts with letter and contains only valid characters
-        valid_id = ''.join(c if c.isalnum() or c in '_-.' else '_' for c in base_id)
-        if not valid_id[0].isalpha() and valid_id[0] != '_':
-            valid_id = 'ID_' + valid_id
-        
-        return valid_id
-    
-    def get_type_name(self) -> str:
-        return 'ID'
-    
-    def get_fallback_value(self) -> str:
-        return "ID_123"
-
 
 class Base64BinaryTypeGenerator(BaseTypeGenerator):
     """Generator for xs:base64Binary types ensuring valid base64 encoding."""
@@ -921,11 +1028,22 @@ class TypeGeneratorFactory:
     def __init__(self, config_instance=None):
         self.config = config_instance
     
-    def create_generator(self, xsd_type_name, constraints: Optional[Dict] = None) -> BaseTypeGenerator:
+    def create_generator(self, xsd_type_name, constraints: Optional[Dict] = None, element_name: str = "") -> BaseTypeGenerator:
         """Create appropriate generator based on XSD type."""
         # Handle enumeration types first
         if constraints and 'enum_values' in constraints:
             return EnumerationTypeGenerator(self.config, constraints['enum_values'])
+        
+        # Handle special element name patterns for known cases where type resolution fails
+        if element_name:
+            element_lower = element_name.lower()
+            if 'reftids' in element_lower or 'refids' in element_lower:
+                return IDREFSTypeGenerator(self.config)
+            elif element_lower.endswith('idref') or 'idref' in element_lower:
+                return IDREFTypeGenerator(self.config)
+            elif element_lower == 'tid' and any(keyword in str(xsd_type_name).lower() for keyword in ['nmtoken', 'id']):
+                # Handle TID elements that should be treated as IDs
+                return IDTypeGenerator(self.config)
         
         # Handle special XSD types by name inspection first
         try:
@@ -937,6 +1055,10 @@ class TypeGeneratorFactory:
         # Check for specific XSD types that need special handling
         if type_str and ("'xs:id'" in type_str or ('xsdatomicbuiltin' in type_str and "'xs:id'" in type_str)):
             return IDTypeGenerator(self.config)
+        elif type_str and ("'xs:idrefs'" in type_str or ('xsdatomicbuiltin' in type_str and "'xs:idrefs'" in type_str)):
+            return IDREFSTypeGenerator(self.config)
+        elif type_str and ("'xs:idref'" in type_str or ('xsdatomicbuiltin' in type_str and "'xs:idref'" in type_str)):
+            return IDREFTypeGenerator(self.config)
         elif type_str and ("'xs:base64binary'" in type_str or 'base64binary' in type_str):
             return Base64BinaryTypeGenerator(self.config)
         
@@ -963,6 +1085,10 @@ class TypeGeneratorFactory:
                     return DateTimeTypeGenerator(self.config, 'duration')
                 elif any(t in primitive_name for t in ['float', 'double']):
                     return NumericTypeGenerator(self.config, is_decimal=True)
+                elif 'idrefs' in primitive_name:
+                    return IDREFSTypeGenerator(self.config)
+                elif 'idref' in primitive_name:
+                    return IDREFTypeGenerator(self.config)
                 elif 'id' in primitive_name and primitive_name.endswith('id'):
                     return IDTypeGenerator(self.config)
                 elif 'base64binary' in primitive_name:
@@ -995,7 +1121,7 @@ class TypeGeneratorFactory:
             # Extract the actual type from XsdAtomicBuiltin(name='xs:type')
             if "'xs:decimal'" in type_str or "'xs:float'" in type_str or "'xs:double'" in type_str:
                 return NumericTypeGenerator(self.config, is_decimal=True, is_integer=False)
-            elif "'xs:integer'" in type_str or "'xs:int'" in type_str or "'xs:long'" in type_str:
+            elif "'xs:integer'" in type_str or "'xs:int'" in type_str or "'xs:long'" in type_str or "'xs:nonnegativeinteger'" in type_str or "'xs:positiveinteger'" in type_str or "'xs:negativeinteger'" in type_str or "'xs:nonpositiveinteger'" in type_str:
                 return NumericTypeGenerator(self.config, is_decimal=False, is_integer=True)
             elif "'xs:datetime'" in type_str:
                 return DateTimeTypeGenerator(self.config, 'datetime')
@@ -1013,7 +1139,7 @@ class TypeGeneratorFactory:
         # Fallback string-based detection
         if any(t in type_str for t in ['decimal', 'float', 'double']):
             return NumericTypeGenerator(self.config, is_decimal=True, is_integer=False)
-        elif any(t in type_str for t in ['integer', 'int', 'long', 'short']):
+        elif any(t in type_str for t in ['integer', 'int', 'long', 'short', 'nonnegativeinteger', 'positiveinteger', 'negativeinteger', 'nonpositiveinteger']):
             return NumericTypeGenerator(self.config, is_decimal=False, is_integer=True)
         elif 'boolean' in type_str:
             return BooleanTypeGenerator(self.config)

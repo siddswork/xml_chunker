@@ -60,7 +60,10 @@ class UniversalXSDTypeResolver:
         
         # Handle XsdAtomicBuiltin (primitive types like xs:string, xs:decimal)
         if isinstance(xsd_type, XsdAtomicBuiltin):
-            return self._extract_primitive_name(xsd_type), constraints
+            primitive_name = self._extract_primitive_name(xsd_type)
+            # Add implicit constraints for derived XSD types
+            constraints.update(self._get_implicit_constraints(primitive_name))
+            return primitive_name, constraints
         
         # Handle XsdAtomicRestriction (restricted primitive types)
         if isinstance(xsd_type, XsdAtomicRestriction):
@@ -106,6 +109,46 @@ class UniversalXSDTypeResolver:
         
         # Default fallback
         return 'xs:string', constraints
+    
+    def _get_implicit_constraints(self, primitive_name: str) -> Dict[str, Any]:
+        """Add implicit constraints for derived XSD types that have built-in restrictions."""
+        constraints = {}
+        
+        # Handle XSD derived integer types with implicit range constraints
+        if primitive_name == 'xs:nonNegativeInteger':
+            constraints['min_value'] = 0
+        elif primitive_name == 'xs:positiveInteger':
+            constraints['min_value'] = 1
+        elif primitive_name == 'xs:negativeInteger':
+            constraints['max_value'] = -1
+        elif primitive_name == 'xs:nonPositiveInteger':
+            constraints['max_value'] = 0
+        elif primitive_name == 'xs:unsignedLong':
+            constraints['min_value'] = 0
+            constraints['max_value'] = 18446744073709551615  # 2^64 - 1
+        elif primitive_name == 'xs:unsignedInt':
+            constraints['min_value'] = 0
+            constraints['max_value'] = 4294967295  # 2^32 - 1
+        elif primitive_name == 'xs:unsignedShort':
+            constraints['min_value'] = 0
+            constraints['max_value'] = 65535  # 2^16 - 1
+        elif primitive_name == 'xs:unsignedByte':
+            constraints['min_value'] = 0
+            constraints['max_value'] = 255  # 2^8 - 1
+        elif primitive_name == 'xs:long':
+            constraints['min_value'] = -9223372036854775808  # -2^63
+            constraints['max_value'] = 9223372036854775807   # 2^63 - 1
+        elif primitive_name == 'xs:int':
+            constraints['min_value'] = -2147483648  # -2^31
+            constraints['max_value'] = 2147483647   # 2^31 - 1
+        elif primitive_name == 'xs:short':
+            constraints['min_value'] = -32768  # -2^15
+            constraints['max_value'] = 32767   # 2^15 - 1
+        elif primitive_name == 'xs:byte':
+            constraints['min_value'] = -128  # -2^7
+            constraints['max_value'] = 127   # 2^7 - 1
+        
+        return constraints
     
     def _resolve_complex_type(self, complex_type: XsdComplexType) -> Tuple[str, Dict[str, Any]]:
         """Resolve complex types (may have simple content)."""
