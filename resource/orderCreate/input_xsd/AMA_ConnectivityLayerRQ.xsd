@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- edited with XMLSpy v2017 rel. 3 (x64) (http://www.altova.com) by ﻿AMADEUS s.a.s. (AMADEUS s.a.s.) -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:ota="http://www.opentravel.org/OTA/2003/05/OTA2011A" xmlns:ama="http://xml.amadeus.com/2010/06/Types_v2" xmlns:ttr="http://xml.amadeus.com/2010/06/TTR_Types_v1" xmlns:pnr="http://xml.amadeus.com/2010/06/PNR_Types_v2" xmlns:etr="http://xml.amadeus.com/2010/06/ETR_Types_v2" elementFormDefault="qualified" attributeFormDefault="unqualified" version="1.0">
+	<xs:include schemaLocation="AMA_ConnectivityLayer_CommonFlat.xsd"/>
+	<xs:element name="AMA_ConnectivityLayerRQ" type="ConnectivityLayerBomType"/>
+</xs:schema>

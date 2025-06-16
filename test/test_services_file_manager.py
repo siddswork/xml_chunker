@@ -138,30 +138,30 @@ class TestFileManagerXSDDependencies:
         shutil.rmtree(self.test_dir, ignore_errors=True)
         shutil.rmtree(self.resource_dir, ignore_errors=True)
     
-    @patch.object(FileManager, '__init__', lambda x, config=None: setattr(x, 'config', Mock()))
     def test_setup_temp_directory_with_dependencies_success(self):
         """Test successful XSD dependency setup."""
-        # Create mock config
-        mock_config = Mock()
-        mock_config.get_resource_dir.return_value = self.resource_dir
         file_manager = FileManager()
-        file_manager.config = mock_config
         
-        # Create source XSD files in resource directory
+        # Create source XSD files in resource directory (simulating original location)
         source_files = ['IATA_OrderViewRS.xsd', 'IATA_OffersAndOrdersCommonTypes.xsd']
         for filename in source_files:
             source_path = os.path.join(self.resource_dir, filename)
             with open(source_path, 'w') as f:
                 f.write(f'<schema>{filename}</schema>')
         
-        # Create target XSD file
+        # Create target XSD file in resource directory too (simulating user upload)
         target_file = 'TestSchema.xsd'
-        target_path = os.path.join(self.test_dir, target_file)
-        with open(target_path, 'w') as f:
+        source_target_path = os.path.join(self.resource_dir, target_file)
+        with open(source_target_path, 'w') as f:
             f.write('<schema>TestSchema</schema>')
         
-        # Test dependency setup
-        file_manager.setup_temp_directory_with_dependencies(target_path, target_file)
+        # Create target XSD file in temp directory (simulating temp processing)
+        temp_target_path = os.path.join(self.test_dir, target_file)
+        with open(temp_target_path, 'w') as f:
+            f.write('<schema>TestSchema</schema>')
+        
+        # Test dependency setup with source path
+        file_manager.setup_temp_directory_with_dependencies(temp_target_path, target_file, source_target_path)
         
         # Verify dependencies were copied (excluding the target file itself)
         for filename in source_files:
@@ -173,28 +173,20 @@ class TestFileManagerXSDDependencies:
                     content = f.read()
                     assert f'<schema>{filename}</schema>' in content
     
-    @patch.object(FileManager, '__init__', lambda x, config=None: setattr(x, 'config', Mock()))
-    def test_setup_temp_directory_missing_resource_dir(self):
-        """Test dependency setup with missing resource directory."""
-        mock_config = Mock()
-        mock_config.get_resource_dir.return_value = '/nonexistent/directory'
+    def test_setup_temp_directory_missing_source_dir(self):
+        """Test dependency setup with missing source directory."""
         file_manager = FileManager()
-        file_manager.config = mock_config
         
         target_path = os.path.join(self.test_dir, 'test.xsd')
         with open(target_path, 'w') as f:
             f.write('<schema>test</schema>')
         
         # Should not raise exception, should handle gracefully
-        file_manager.setup_temp_directory_with_dependencies(target_path, 'test.xsd')
+        file_manager.setup_temp_directory_with_dependencies(target_path, 'test.xsd', '/nonexistent/directory/test.xsd')
     
-    @patch.object(FileManager, '__init__', lambda x, config=None: setattr(x, 'config', Mock()))
     def test_setup_temp_directory_missing_temp_dir(self):
         """Test dependency setup with missing temp directory."""
-        mock_config = Mock()
-        mock_config.get_resource_dir.return_value = self.resource_dir
         file_manager = FileManager()
-        file_manager.config = mock_config
         
         # Use non-existent temp directory
         fake_path = '/nonexistent/directory/test.xsd'
@@ -202,24 +194,25 @@ class TestFileManagerXSDDependencies:
         # Should not raise exception, should handle gracefully
         file_manager.setup_temp_directory_with_dependencies(fake_path, 'test.xsd')
     
-    @patch.object(FileManager, '__init__', lambda x, config=None: setattr(x, 'config', Mock()))
     def test_setup_temp_directory_file_copy_error(self):
         """Test dependency setup with file copy error."""
-        mock_config = Mock()
-        mock_config.get_resource_dir.return_value = self.resource_dir
         file_manager = FileManager()
-        file_manager.config = mock_config
         
         # Create a directory instead of file to cause copy error
         problem_dir = os.path.join(self.resource_dir, 'NotAFile.xsd')
         os.makedirs(problem_dir)
+        
+        # Create source XSD file  
+        source_target_path = os.path.join(self.resource_dir, 'test.xsd')
+        with open(source_target_path, 'w') as f:
+            f.write('<schema>test</schema>')
         
         target_path = os.path.join(self.test_dir, 'test.xsd')
         with open(target_path, 'w') as f:
             f.write('<schema>test</schema>')
         
         # Should handle copy error gracefully
-        file_manager.setup_temp_directory_with_dependencies(target_path, 'test.xsd')
+        file_manager.setup_temp_directory_with_dependencies(target_path, 'test.xsd', source_target_path)
 
 
 class TestFileManagerXSDWithDependencies:
@@ -255,7 +248,7 @@ class TestFileManagerXSDWithDependencies:
             mock_file().write.assert_called_once_with(xsd_content)
             
             # Verify dependency setup was called
-            mock_setup_deps.assert_called_once_with(expected_path, xsd_filename)
+            mock_setup_deps.assert_called_once_with(expected_path, xsd_filename, None)
 
 
 class TestFileManagerErrorHandling:
