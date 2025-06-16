@@ -1,0 +1,9 @@
+<OrderCreateRQ Version="17.2">
+  <PointOfSale>
+    <Location>
+      <CountryCode>FR</CountryCode>
+      <CityCode>NCE</CityCode>
+    </Location>
+  </PointOfSale>
+  <Document id="document"/>
+</OrderCreateRQ>
