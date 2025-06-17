@@ -270,8 +270,13 @@ class XMLGenerator:
     
     
     
-    def _generate_value_for_type(self, type_name, element_name: str = "") -> Any:
-        """Generate validation-compliant value using universal type resolution."""
+    def _generate_value_for_type(self, type_name, element_name: str = "", current_path: str = "") -> Any:
+        """Generate validation-compliant value using universal type resolution with custom value support."""
+        # PRIORITY: Check for custom values from configuration first
+        custom_value = self._get_custom_value(element_name, current_path)
+        if custom_value is not None:
+            return custom_value
+        
         if not self.type_resolver:
             # Fallback to original method if type resolver not available
             return self._generate_value_for_type_fallback(type_name, element_name)
@@ -303,6 +308,50 @@ class XMLGenerator:
         # Create appropriate type generator based on resolved primitive type
         generator = self._create_generator_from_primitive_type(primitive_type, constraints)
         return generator.generate(element_name, constraints)
+    
+    def _get_custom_value(self, element_name: str, current_path: str = "") -> Any:
+        """
+        Get custom value from configuration for the given element.
+        
+        Args:
+            element_name: Name of the element
+            current_path: Current path in XML hierarchy
+            
+        Returns:
+            Custom value if found, None otherwise
+        """
+        if not hasattr(self, 'custom_values') or not self.custom_values:
+            return None
+        
+        # Try multiple matching strategies
+        possible_matches = [
+            element_name,
+            current_path,
+            current_path.split('.')[-1] if '.' in current_path else current_path,
+            element_name.split(':')[-1] if ':' in element_name else element_name
+        ]
+        
+        # Check direct element values in custom_values
+        for element_config_name, element_config in self.custom_values.items():
+            if isinstance(element_config, dict) and 'values' in element_config:
+                # Check if this element config applies to current element
+                if any(match in element_config_name or element_config_name in match for match in possible_matches):
+                    values = element_config['values']
+                    
+                    # Check for exact element name match
+                    if element_name in values:
+                        return values[element_name]
+                    
+                    # Check for element name without namespace prefix
+                    clean_element_name = element_name.split(':')[-1] if ':' in element_name else element_name
+                    if clean_element_name in values:
+                        return values[clean_element_name]
+            
+            # Check if the element_config itself contains the value directly
+            elif any(match == element_config_name for match in possible_matches):
+                return element_config
+        
+        return None
     
     def _enhance_enumeration_constraints(self, type_name, constraints: Dict[str, Any]):
         """Enhance constraints with comprehensive enumeration extraction."""
@@ -734,34 +783,11 @@ class XMLGenerator:
                                         result[child_name] = self._create_element_dict(nested_child, f"{current_path}.{child_name}", depth + 1)
                 return
         
-        # Fallback to old method for non-sequence or when _group is not available
-        # Get elements in proper sequence order
+        # Fallback: Process all elements in strict sequence order (NO choice-first processing)
         ordered_elements = self._get_sequence_ordered_elements(element.type)
         
-        # Process choice elements first (if any)
-        choice_elements = self._get_choice_elements(element)
-        processed_choice_elements = set()
-        
-        if choice_elements and len(choice_elements) > 1:
-            # This is a choice construct - select one element
-            selected_element = self._select_choice_element(choice_elements, current_path)
-            if selected_element:
-                child_name = self._format_element_name(selected_element)
-                
-                if selected_element.max_occurs is None or selected_element.max_occurs > 1:
-                    count = self._get_element_count(child_name, selected_element, depth)
-                    safe_count = min(count, max(1, self.config.recursion.max_tree_depth - depth))
-                    result[child_name] = [self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1) for _ in range(safe_count)]
-                else:
-                    result[child_name] = self._create_element_dict(selected_element, f"{current_path}.{child_name}", depth + 1)
-                
-                # Mark choice elements as processed
-                processed_choice_elements.update(choice_elements)
-        
-        # Process remaining elements in sequence order
+        # Process ALL elements in their EXACT sequence order - no reordering
         for child in ordered_elements:
-            if child in processed_choice_elements:
-                continue  # Skip already processed choice elements
                 
             child_name = self._format_element_name(child)
             
@@ -794,13 +820,13 @@ class XMLGenerator:
                 hasattr(element.type.content, 'is_simple') and 
                 element.type.content.is_simple())
     
-    def _handle_complex_simple_content(self, element, result: Dict[str, Any]) -> Any:
+    def _handle_complex_simple_content(self, element, result: Dict[str, Any], current_path: str = "") -> Any:
         """Handle complex types with simple content properly."""
         if not self._is_complex_type_with_simple_content(element):
             return result
         
         # Generate the base value for simple content
-        base_value = self._generate_value_for_type(element.type.content, element.local_name)
+        base_value = self._generate_value_for_type(element.type.content, element.local_name, current_path)
         
         # CRITICAL: Ensure complex simple content never has empty values
         if base_value is None or base_value == "":
@@ -1073,7 +1099,7 @@ class XMLGenerator:
             
             # Process simple types
             if element.type.is_simple():
-                value = self._generate_value_for_type(element.type, element.local_name)
+                value = self._generate_value_for_type(element.type, element.local_name, current_path)
                 # Ensure no elements return empty values - use type-aware fallbacks
                 if value is None or value == "":
                     if self.type_resolver and element.type:
@@ -1098,14 +1124,14 @@ class XMLGenerator:
                 if hasattr(element.type, 'attributes') and element.type.attributes:
                     for attr_name, attr in element.type.attributes.items():
                         if attr.type is not None:
-                            result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name)
+                            result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name, current_path)
                 
                 # CRITICAL: Special handling for complex types with simple content (like Amount)
                 if (hasattr(element.type, 'content') and element.type.content and 
                     hasattr(element.type.content, 'is_simple') and element.type.content.is_simple()):
                     
                     # Generate value using type resolution for the content
-                    base_value = self._generate_value_for_type(element.type.content, element.local_name)
+                    base_value = self._generate_value_for_type(element.type.content, element.local_name, current_path)
                     
                     # Apply type-aware fallback if base_value is empty
                     if base_value is None or base_value == "":
@@ -1130,7 +1156,7 @@ class XMLGenerator:
                 # These have attributes AND a simple base type as content
                 is_complex_simple = self._is_complex_type_with_simple_content(element)
                 if is_complex_simple:
-                    complex_simple_result = self._handle_complex_simple_content(element, result)
+                    complex_simple_result = self._handle_complex_simple_content(element, result, current_path)
                     return complex_simple_result
                 
                 # Process content using sequence-aware processing
@@ -1158,11 +1184,66 @@ class XMLGenerator:
                     except:
                         return 0.0  # Ultimate fallback
             
+            # CRITICAL: Ensure result is in correct XSD sequence order before returning
+            result = self._enforce_sequence_order(element, result)
+            
             return result
             
         finally:
             # Remove from processed types when done
             self.processed_types.discard(type_key)
+    
+    def _enforce_sequence_order(self, element: xmlschema.validators.XsdElement, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure result dictionary maintains exact XSD sequence order recursively."""
+        if not result or not hasattr(element.type, 'content') or element.type.content is None:
+            return result
+            
+        content = element.type.content
+        
+        # Only enforce ordering for sequence models
+        if not (hasattr(content, 'model') and str(content.model) == 'sequence'):
+            return result
+            
+        # Get the correct sequence order from XSD
+        ordered_elements = self._get_sequence_ordered_elements(element.type)
+        if not ordered_elements:
+            return result
+            
+        # Create new OrderedDict with elements in correct sequence order
+        from collections import OrderedDict
+        ordered_result = OrderedDict()
+        
+        # Add elements in their proper XSD sequence order
+        for xsd_element in ordered_elements:
+            element_name = self._format_element_name(xsd_element)
+            if element_name in result:
+                child_value = result[element_name]
+                
+                # CRITICAL: Recursively apply sequence ordering to nested complex elements
+                if isinstance(child_value, list):
+                    # Handle list of elements
+                    ordered_child_list = []
+                    for item in child_value:
+                        if isinstance(item, dict):
+                            # Apply sequence ordering to each dict in the list
+                            ordered_item = self._enforce_sequence_order(xsd_element, item)
+                            ordered_child_list.append(ordered_item)
+                        else:
+                            ordered_child_list.append(item)
+                    ordered_result[element_name] = ordered_child_list
+                elif isinstance(child_value, dict):
+                    # Apply sequence ordering to nested dict
+                    ordered_result[element_name] = self._enforce_sequence_order(xsd_element, child_value)
+                else:
+                    # Simple value - no ordering needed
+                    ordered_result[element_name] = child_value
+        
+        # Add any remaining elements that weren't in the sequence (shouldn't happen, but safety)
+        for key, value in result.items():
+            if key not in ordered_result:
+                ordered_result[key] = value
+                
+        return ordered_result
     
     def _create_element_dict_iterative(self, root_element: xmlschema.validators.XsdElement, path: str = "", max_depth: int = 20) -> Dict[str, Any]:
         """
@@ -1220,6 +1301,10 @@ class XMLGenerator:
                     element, current_path, depth, current_parent, element_queue
                 )
         
+        # CRITICAL: Ensure result is in correct XSD sequence order before returning
+        if isinstance(result, dict):
+            result = self._enforce_sequence_order(root_element, result)
+        
         return result
     
     def _process_single_element_iterative(self, element: xmlschema.validators.XsdElement, path: str, depth: int) -> Any:
@@ -1231,7 +1316,7 @@ class XMLGenerator:
         
         # Process simple types
         if element.type.is_simple():
-            value = self._generate_value_for_type(element.type, element.local_name)
+            value = self._generate_value_for_type(element.type, element.local_name, path)
             # Ensure no elements return empty values
             if value is None or value == "":
                 return self._generate_element_fallback(element.local_name)
@@ -1245,12 +1330,12 @@ class XMLGenerator:
             if hasattr(element.type, 'attributes') and element.type.attributes:
                 for attr_name, attr in element.type.attributes.items():
                     if attr.type is not None:
-                        result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name)
+                        result[f'@{attr_name}'] = self._generate_value_for_type(attr.type, attr_name, path)
             
             # Handle complex types with simple content
             if (hasattr(element.type, 'content') and element.type.content and 
                 hasattr(element.type.content, 'is_simple') and element.type.content.is_simple()):
-                base_value = self._generate_value_for_type(element.type.content, element.local_name)
+                base_value = self._generate_value_for_type(element.type.content, element.local_name, path)
                 if result:  # Has attributes
                     result['_text'] = base_value
                     return result
@@ -1302,7 +1387,8 @@ class XMLGenerator:
                             child_name = self._format_element_name(child)
                             new_path = f"{current_path}.{child_name}" if current_path else child_name
                             
-                            # Skip if already processed (avoid duplicates)
+                            # CRITICAL: For sequence compliance, NEVER skip elements in their proper order
+                            # Only skip if this exact element instance was already processed to prevent infinite loops
                             if child_name in parent_dict:
                                 continue
                             
@@ -1455,16 +1541,40 @@ class XMLGenerator:
         if not self.schema:
             return '<?xml version="1.0" encoding="UTF-8"?><error>Failed to load schema</error>'
         
+        # Reset all stateful variables for clean generation
+        self.processed_types = set()
+        
+        # Clear any caches that might affect element processing order
+        if hasattr(self, 'constraint_extractor') and self.constraint_extractor:
+            if hasattr(self.constraint_extractor, 'constraint_cache'):
+                self.constraint_extractor.constraint_cache.clear()
+            if hasattr(self.constraint_extractor, 'type_resolution_cache'):
+                self.constraint_extractor.type_resolution_cache.clear()
+        
+        # Reset ID counter to ensure unique IDs for this document
+        from utils.type_generators import IDTypeGenerator
+        IDTypeGenerator.reset_id_counter()
+        
         # Store user preferences
         self.user_choices = selected_choices or {}
         self.user_unbounded_counts = unbounded_counts or {}
         
         return self.generate_dummy_xml(output_path)
     
-    def generate_dummy_xml_with_options(self, selected_choices=None, unbounded_counts=None, generation_mode="Minimalistic", optional_selections=None, output_path=None) -> str:
-        """Generate XML with comprehensive user options including generation mode and optional element selection."""
+    def generate_dummy_xml_with_options(self, selected_choices=None, unbounded_counts=None, generation_mode="Minimalistic", optional_selections=None, output_path=None, custom_values=None) -> str:
+        """Generate XML with comprehensive user options including generation mode, optional element selection, and custom values."""
         if not self.schema:
             return '<?xml version="1.0" encoding="UTF-8"?><error>Failed to load schema</error>'
+        
+        # Reset all stateful variables for clean generation
+        self.processed_types = set()
+        
+        # Clear any caches that might affect element processing order
+        if hasattr(self, 'constraint_extractor') and self.constraint_extractor:
+            if hasattr(self.constraint_extractor, 'constraint_cache'):
+                self.constraint_extractor.constraint_cache.clear()
+            if hasattr(self.constraint_extractor, 'type_resolution_cache'):
+                self.constraint_extractor.type_resolution_cache.clear()
         
         # Reset ID counter to ensure unique IDs for this document
         from utils.type_generators import IDTypeGenerator
@@ -1475,6 +1585,7 @@ class XMLGenerator:
         self.user_unbounded_counts = unbounded_counts or {}
         self.generation_mode = generation_mode
         self.optional_selections = set(optional_selections or [])
+        self.custom_values = custom_values or {}
         
         # Configure depth limits based on generation mode
         if generation_mode == "Complete":
@@ -1937,15 +2048,10 @@ class XMLGenerator:
             # Skip optional AugmentationPoint to avoid validation issues
             return
         
-        # For required AugmentationPoint (rare), try to handle the xs:any content
-        if hasattr(element, 'type') and element.type:
-            # Check if the type contains xs:any elements
-            if self._type_contains_any_elements(element.type):
-                # Generate minimal valid content for the xs:any requirements
-                result[child_name] = self._generate_augmentation_point_content(element)
-            else:
-                # Regular processing for non-xs:any AugmentationPoint
-                result[child_name] = self._create_element_dict(element, f"{current_path}.{child_name}", depth + 1)
+        # For required AugmentationPoint (rare), skip to avoid xs:any validation issues
+        # AugmentationPoint elements with xs:any are complex to generate correctly
+        # and often cause validation errors. Better to skip them.
+        pass
     
     def _type_contains_any_elements(self, element_type) -> bool:
         """Check if a type contains xs:any elements."""
