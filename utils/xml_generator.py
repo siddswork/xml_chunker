@@ -215,6 +215,9 @@ class XMLGenerator:
         self.element_configs = self.config_data.get('element_configs', {})
         self.generation_settings = self.config_data.get('generation_settings', {})
         
+        # Track instance counts for sequential selection strategy
+        self.element_instance_counters = {}
+        
         self._load_schema()
     
     def _load_schema(self) -> None:
@@ -341,7 +344,12 @@ class XMLGenerator:
         Returns:
             Custom value if found, None otherwise
         """
-        return self._get_enhanced_value(element_name, instance_index=0)
+        # Get and increment instance counter for this element
+        clean_element_name = element_name.split(':')[-1] if ':' in element_name else element_name
+        instance_index = self.element_instance_counters.get(clean_element_name, 0)
+        self.element_instance_counters[clean_element_name] = instance_index + 1
+        
+        return self._get_enhanced_value(element_name, instance_index=instance_index)
     
     def _get_enhanced_value(self, element_name: str, type_name: Any = None, instance_index: int = 0, context_values: Dict[str, Any] = None) -> Any:
         """
@@ -695,7 +703,7 @@ class XMLGenerator:
             
             # Add schema-specific paths (check all keys for patterns like "SchemaName.ElementName")
             for key in self.user_unbounded_counts.keys():
-                if '.' in key and key.endswith(f".{element_name}"):
+                if key is not None and '.' in key and key.endswith(f".{element_name}"):
                     possible_paths.append(key)
             
             for path in possible_paths:
@@ -1079,7 +1087,14 @@ class XMLGenerator:
                 self._process_sequence_elements(element, result, current_path, depth)
             elif model_str == 'choice':
                 # This entire content is a choice - select only one element
-                choice_elements = list(content.iter_elements()) if hasattr(content, 'iter_elements') else []
+                choice_elements = []
+                if hasattr(content, 'iter_elements'):
+                    try:
+                        iter_result = content.iter_elements()
+                        if iter_result is not None:
+                            choice_elements = list(iter_result)
+                    except (TypeError, AttributeError):
+                        choice_elements = []
                 selected_choice = self._select_choice_element(choice_elements, current_path)
                 
                 if selected_choice:
@@ -1105,7 +1120,7 @@ class XMLGenerator:
         choice_groups = []
         regular_elements = []
         
-        if hasattr(content, '_group') and content._group:
+        if hasattr(content, '_group') and content._group is not None:
             for group_item in content._group:
                 if hasattr(group_item, 'model') and str(group_item.model) == 'choice':
                     choice_groups.append(group_item)
@@ -1113,17 +1128,32 @@ class XMLGenerator:
                     regular_elements.append(group_item)
                 elif hasattr(group_item, 'iter_elements'):
                     # Nested group - add all its elements as regular elements
-                    for nested_element in group_item.iter_elements():
-                        if hasattr(nested_element, 'local_name') and hasattr(nested_element, 'type'):
-                            regular_elements.append(nested_element)
+                    try:
+                        for nested_element in group_item.iter_elements():
+                            if hasattr(nested_element, 'local_name') and hasattr(nested_element, 'type'):
+                                regular_elements.append(nested_element)
+                    except (TypeError, AttributeError):
+                        # Skip if iter_elements returns None or isn't iterable
+                        pass
         elif hasattr(content, 'iter_elements'):
             # Direct iteration fallback
-            for child in content.iter_elements():
-                regular_elements.append(child)
+            try:
+                for child in content.iter_elements():
+                    regular_elements.append(child)
+            except (TypeError, AttributeError):
+                # Skip if iter_elements returns None or isn't iterable
+                pass
         
         # Process choice groups - select only one element from each
         for choice_group in choice_groups:
-            choice_elements = list(choice_group.iter_elements()) if hasattr(choice_group, 'iter_elements') else []
+            choice_elements = []
+            if hasattr(choice_group, 'iter_elements'):
+                try:
+                    iter_result = choice_group.iter_elements()
+                    if iter_result is not None:
+                        choice_elements = list(iter_result)
+                except (TypeError, AttributeError):
+                    choice_elements = []
             selected_choice = self._select_choice_element(choice_elements, current_path)
             
             if selected_choice:
@@ -1649,6 +1679,9 @@ class XMLGenerator:
         # Reset all stateful variables for clean generation
         self.processed_types = set()
         
+        # Reset instance counters for sequential selection strategy
+        self.element_instance_counters = {}
+        
         # Clear any caches that might affect element processing order
         if hasattr(self, 'constraint_extractor') and self.constraint_extractor:
             if hasattr(self.constraint_extractor, 'constraint_cache'):
@@ -1673,6 +1706,9 @@ class XMLGenerator:
         
         # Reset all stateful variables for clean generation
         self.processed_types = set()
+        
+        # Reset instance counters for sequential selection strategy
+        self.element_instance_counters = {}
         
         # Clear any caches that might affect element processing order
         if hasattr(self, 'constraint_extractor') and self.constraint_extractor:
@@ -1759,6 +1795,10 @@ class XMLGenerator:
             except RecursionError:
                 return self._create_error_xml("Maximum recursion depth exceeded during XML generation")
             except Exception as e:
+                import traceback
+                print(f"Exception occurred in _create_element_dict: {e}")
+                print(f"Exception type: {type(e)}")
+                traceback.print_exc()
                 return self._create_error_xml(f"Error creating element dictionary: {str(e)}")
             
             # Build namespace map safely
