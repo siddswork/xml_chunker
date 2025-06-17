@@ -348,8 +348,19 @@ def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, u
         Generated XML content
     """
     try:
+        # Setup dependencies
         file_manager.setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name)
-        generator = XMLGenerator(xsd_file_path)
+        
+        # Check if we have enhanced configuration data
+        enhanced_config = st.session_state.get('enhanced_config_data')
+        
+        # Create XMLGenerator with progress indication
+        if enhanced_config:
+            # Small delay to show the spinner before heavy processing
+            import time
+            time.sleep(0.1)
+        
+        generator = XMLGenerator(xsd_file_path, config_data=enhanced_config)
         
         # Pass user selections and generation mode to generator
         return generator.generate_dummy_xml_with_options(
@@ -360,9 +371,11 @@ def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, u
             custom_values=custom_values
         )
     except Exception as e:
+        error_msg = f"Error generating XML: {str(e)}"
+        print(f"XMLGenerator Error: {error_msg}")  # Log for debugging
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <error>
-  <message>Error generating XML: {str(e)}</message>
+  <message>{error_msg}</message>
 </error>"""
 
 def render_file_upload_section():
@@ -610,11 +623,17 @@ def render_config_file_section():
         
         if uploaded_config:
             try:
-                config_content = uploaded_config.getvalue().decode("utf-8")
-                config_data = config_manager.load_config(io.StringIO(config_content))
+                # Show loading indicator
+                with st.spinner("📋 Loading configuration..."):
+                    config_content = uploaded_config.getvalue().decode("utf-8")
+                    config_data = config_manager.load_config(io.StringIO(config_content))
                 
-                # Convert to generator options and store in session state
-                generator_options = config_manager.convert_config_to_generator_options(config_data)
+                # Store enhanced configuration data
+                st.session_state['enhanced_config_data'] = config_data
+                
+                # Convert to generator options and store in session state (for backward compatibility)
+                with st.spinner("🔄 Processing configuration..."):
+                    generator_options = config_manager.convert_config_to_generator_options(config_data)
                 
                 st.session_state['selected_choices'] = generator_options.get('selected_choices', {})
                 st.session_state['unbounded_counts'] = generator_options.get('unbounded_counts', {})
@@ -624,15 +643,20 @@ def render_config_file_section():
                 
                 st.success(f"✅ Configuration loaded: {config_data['metadata']['name']}")
                 
+                # Show configuration summary
+                if 'data_contexts' in config_data:
+                    context_names = list(config_data['data_contexts'].keys())
+                    st.info(f"📊 Enhanced configuration with {len(context_names)} data contexts: {', '.join(context_names)}")
+                
                 # Show warnings if any
                 schema_name = st.session_state.get('uploaded_file_name', '')
                 warnings = config_manager.validate_config_compatibility(config_data, schema_name)
                 if warnings:
                     for warning in warnings:
                         st.warning(f"⚠️ {warning}")
-                
-                # Refresh the page to show loaded settings
-                st.rerun()
+
+                # Mark that configuration has been loaded
+                st.session_state['config_loaded'] = True
                 
             except Exception as e:
                 st.error(f"❌ Error loading configuration: {str(e)}")
@@ -1024,9 +1048,21 @@ def render_tab3_generate_validate():
             use_container_width=True
         )
     
+    # Check if we should auto-generate XML after config load
+    auto_generate = st.session_state.get('config_loaded', False) and st.session_state.get('enhanced_config_data') and not st.session_state.get('auto_generated_completed', False)
+    
     # Handle XML generation
-    if generate_clicked:
-        with st.spinner("🔄 Generating XML with your configuration..."):
+    if generate_clicked or auto_generate:
+        enhanced_config = st.session_state.get('enhanced_config_data')
+        if enhanced_config:
+            if auto_generate:
+                spinner_msg = "🚀 Auto-generating XML with enhanced configuration..."
+            else:
+                spinner_msg = "🚀 Generating XML with enhanced configuration (loading schema & applying data contexts)..."
+        else:
+            spinner_msg = "🔄 Generating XML (loading schema & processing structure)..."
+            
+        with st.spinner(spinner_msg):
             # Get user selections from session state
             selected_choices = st.session_state.get('selected_choices', {})
             unbounded_counts = st.session_state.get('unbounded_counts', {})
@@ -1050,6 +1086,11 @@ def render_tab3_generate_validate():
             
             # Store XML content for validation and download
             st.session_state['generated_xml'] = xml_content
+            
+            # Mark auto-generation as completed if it was triggered
+            if auto_generate:
+                st.session_state['auto_generated_completed'] = True
+                st.session_state['config_loaded'] = False  # Reset flag
     
     # Display generated XML if available
     if 'generated_xml' in st.session_state and st.session_state['generated_xml']:

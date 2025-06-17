@@ -58,7 +58,9 @@ class ConfigManager:
                         },
                         "global_repeat_count": {"type": "integer", "minimum": 1, "maximum": 50},
                         "max_depth": {"type": "integer", "minimum": 1, "maximum": 10},
-                        "include_comments": {"type": "boolean"}
+                        "include_comments": {"type": "boolean"},
+                        "deterministic_seed": {"type": "integer"},
+                        "ensure_unique_combinations": {"type": "boolean"}
                     },
                     "additionalProperties": False
                 },
@@ -68,14 +70,6 @@ class ConfigManager:
                         "^[a-zA-Z][a-zA-Z0-9_]*$": {
                             "type": "object",
                             "properties": {
-                                "values": {
-                                    "type": "object",
-                                    "patternProperties": {
-                                        "^[a-zA-Z][a-zA-Z0-9_]*$": {
-                                            "type": ["string", "number", "boolean"]
-                                        }
-                                    }
-                                },
                                 "choices": {
                                     "type": "object",
                                     "patternProperties": {
@@ -86,7 +80,23 @@ class ConfigManager:
                                 "include_optional": {
                                     "type": "array",
                                     "items": {"type": "string"}
-                                }
+                                },
+                                "custom_values": {
+                                    "type": "array",
+                                    "items": {"type": ["string", "number", "boolean"]}
+                                },
+                                "selection_strategy": {
+                                    "type": "string",
+                                    "enum": ["random", "sequential", "seeded", "template"]
+                                },
+                                "data_context": {"type": "string"},
+                                "template_source": {"type": "string"},
+                                "relationship": {"type": "string"},
+                                "constraints": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                },
+                                "ensure_unique": {"type": "boolean"}
                             },
                             "additionalProperties": False
                         }
@@ -97,6 +107,7 @@ class ConfigManager:
                     "properties": {
                         "default_string_length": {"type": "integer", "minimum": 1, "maximum": 1000},
                         "use_realistic_data": {"type": "boolean"},
+                        "preserve_structure": {"type": "boolean"},
                         "namespace_prefixes": {
                             "type": "object",
                             "patternProperties": {
@@ -105,6 +116,38 @@ class ConfigManager:
                         }
                     },
                     "additionalProperties": False
+                },
+                "data_contexts": {
+                    "type": "object",
+                    "additionalProperties": True
+                },
+                "smart_relationships": {
+                    "type": "object",
+                    "patternProperties": {
+                        "^[a-zA-Z][a-zA-Z0-9_]*$": {
+                            "type": "object",
+                            "properties": {
+                                "fields": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                },
+                                "strategy": {
+                                    "type": "string",
+                                    "enum": ["consistent_persona", "dependent_values", "constraint_based"]
+                                },
+                                "ensure_unique": {"type": "boolean"},
+                                "constraints": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                },
+                                "depends_on": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                }
+                            },
+                            "additionalProperties": False
+                        }
+                    }
                 }
             },
             "required": ["metadata", "generation_settings"],
@@ -319,9 +362,9 @@ class ConfigManager:
                 for optional in element_config["include_optional"]:
                     generator_options["optional_selections"].append(f"{element_name}.{optional}")
             
-            # Extract custom values
-            if "values" in element_config:
-                generator_options["custom_values"][element_name] = element_config["values"]
+            # Extract custom values (new format only)
+            if "custom_values" in element_config:
+                generator_options["custom_values"][element_name] = element_config["custom_values"]
         
         return generator_options
     
@@ -351,22 +394,30 @@ class ConfigManager:
             },
             "element_configs": {
                 "OrderCreateRQ": {
-                    "values": {
-                        "Version": "21.3",
-                        "EchoToken": "test-token-12345"
-                    },
                     "choices": {
                         "PaymentMethod": "CreditCard"
                     },
                     "repeat_count": 1,
                     "include_optional": ["Metadata", "Extensions"]
                 },
+                "Version": {
+                    "custom_values": ["21.3", "21.2", "21.1"],
+                    "selection_strategy": "sequential"
+                },
+                "EchoToken": {
+                    "custom_values": ["test-token-12345", "test-token-67890"],
+                    "selection_strategy": "sequential"
+                },
                 "Traveler": {
-                    "repeat_count": 3,
-                    "values": {
-                        "GivenName": "John",
-                        "Surname": "Doe"
-                    }
+                    "repeat_count": 3
+                },
+                "GivenName": {
+                    "custom_values": ["John", "Jane", "Michael"],
+                    "selection_strategy": "sequential"
+                },
+                "Surname": {
+                    "custom_values": ["Doe", "Smith", "Johnson"],
+                    "selection_strategy": "sequential"
                 }
             },
             "global_overrides": {

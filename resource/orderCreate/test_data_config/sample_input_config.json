@@ -1,16 +1,63 @@
 {
   "metadata": {
-    "name": "Configuration for sample_input.xml",
-    "description": "Configuration to generate XML similar to sample_input.xml with flight booking data",
+    "name": "Enhanced Configuration for AMA_ConnectivityLayerRQ.xsd",
+    "description": "Enhanced configuration to generate valid XML for AMA_ConnectivityLayerRQ.xsd with proper data",
     "schema_name": "AMA_ConnectivityLayerRQ.xsd",
     "created": "2025-06-17T12:00:00.000000",
-    "version": "1.0"
+    "version": "2.0"
   },
   "generation_settings": {
     "mode": "Complete",
-    "global_repeat_count": 2,
-    "max_depth": 10,
-    "include_comments": true
+    "global_repeat_count": 1,
+    "max_depth": 8,
+    "include_comments": true,
+    "deterministic_seed": 12345,
+    "ensure_unique_combinations": true
+  },
+  "data_contexts": {
+    "global": {
+      "request_targets": ["FlightBooking", "HotelReservation", "CarRental"],
+      "request_ids": ["REQ001", "REQ002", "REQ003"],
+      "actions": ["Create", "Update", "Cancel", "Retrieve"],
+      "airlines": ["AA", "UA", "DL", "WN", "B6"],
+      "flight_numbers": ["1234", "5678", "9012", "3456", "7890"],
+      "airports": ["NYC", "LAX", "CHI", "MIA", "SEA", "DFW", "ATL"],
+      "cabin_classes": ["Y", "C", "F", "W"],
+      "dates": ["2024-01-15", "2024-01-16", "2024-01-17"],
+      "times": ["08:00", "10:30", "14:15", "18:45", "11:30", "13:45", "17:20", "21:30"]
+    },
+    "property_keys": [
+      "passenger_count",
+      "departure_city", 
+      "arrival_city",
+      "cabin_class",
+      "departure_date",
+      "airline_preference",
+      "booking_type",
+      "special_requests"
+    ],
+    "property_values": [
+      "2",
+      "NYC",
+      "LAX", 
+      "Y",
+      "2024-01-15",
+      "AA",
+      "round_trip",
+      "none"
+    ]
+  },
+  "smart_relationships": {
+    "property_pairs": {
+      "fields": ["key", "value"],
+      "strategy": "consistent_persona",
+      "ensure_unique": false
+    },
+    "flight_data": {
+      "fields": ["airline", "flight_number", "departure_date", "departure_time", "arrival_time"],
+      "strategy": "consistent_persona",
+      "ensure_unique": false
+    }
   },
   "element_configs": {
     "Requests": {
@@ -20,89 +67,85 @@
       "repeat_count": 1
     },
     "target": {
-      "custom_values": ["FlightBooking"]
+      "data_context": "global.request_targets",
+      "selection_strategy": "sequential"
     },
     "id": {
-      "custom_values": ["REQ001", "REQ002", "REQ003"]
+      "data_context": "global.request_ids", 
+      "selection_strategy": "sequential"
     },
     "action": {
-      "custom_values": ["Create", "Update", "Cancel"]
+      "data_context": "global.actions",
+      "selection_strategy": "sequential"
     },
     "property": {
       "repeat_count": 3
     },
     "key": {
-      "custom_values": ["passenger_count", "departure_city", "arrival_city", "cabin_class", "departure_date"]
+      "data_context": "property_keys",
+      "selection_strategy": "sequential"
     },
     "value": {
-      "custom_values": ["2", "NYC", "LAX", "Y", "2024-01-15"]
+      "data_context": "property_values",
+      "selection_strategy": "sequential"
     },
     "set": {
       "repeat_count": 1
     },
-    "flights": {
-      "repeat_count": 1
-    },
-    "flight": {
+    "product": {
       "repeat_count": 2
     },
-    "airline": {
-      "custom_values": ["AA", "UA", "DL", "WN", "B6"]
+    "type": {
+      "custom_values": ["FlightProduct", "ServiceProduct"],
+      "selection_strategy": "sequential"
     },
-    "flight_number": {
-      "custom_values": ["1234", "5678", "9012", "3456", "7890"]
-    },
-    "departure_date": {
-      "custom_values": ["2024-01-15", "2024-01-16", "2024-01-17"]
-    },
-    "departure_time": {
-      "custom_values": ["08:00", "10:30", "14:15", "18:45"]
-    },
-    "arrival_date": {
-      "custom_values": ["2024-01-15", "2024-01-16", "2024-01-17"]
-    },
-    "arrival_time": {
-      "custom_values": ["11:30", "13:45", "17:20", "21:30"]
-    },
-    "cabin_class": {
-      "custom_values": ["Y", "C", "F", "W"]
-    },
-    "passengers": {
+    "supplier": {
       "repeat_count": 1
     },
-    "passenger": {
-      "repeat_count": 2
+    "name": {
+      "custom_values": ["American Airlines", "United Airlines", "Delta Airlines"],
+      "selection_strategy": "sequential"
     },
-    "title": {
-      "custom_values": ["Mr", "Ms", "Mrs", "Dr"]
+    "code": {
+      "data_context": "global.airlines",
+      "selection_strategy": "sequential"
     },
-    "first_name": {
-      "custom_values": ["John", "Jane", "Michael", "Sarah", "David", "Emily"]
+    "ID": {
+      "custom_values": ["ID123456", "ID789012", "ID345678"],
+      "selection_strategy": "sequential"
     },
-    "last_name": {
-      "custom_values": ["Doe", "Smith", "Johnson", "Williams", "Brown", "Davis"]
+    "TID": {
+      "custom_values": ["TID8736", "TID8737", "TID8738", "TID8739"],
+      "selection_strategy": "sequential"
     },
-    "email": {
-      "custom_values": ["john.doe@email.com", "jane.smith@email.com", "passenger@airline.com"]
+    "RefTIDs": {
+      "custom_values": ["TID8736"],
+      "selection_strategy": "sequential"
     },
-    "phone": {
-      "custom_values": ["+1234567890", "+1987654321", "+1555123456"]
+    "tattoo": {
+      "custom_values": ["123", "456", "789"],
+      "selection_strategy": "sequential"
+    },
+    "ediType": {
+      "custom_values": ["SampleType", "FlightType", "ServiceType"],
+      "selection_strategy": "sequential"
+    },
+    "xPath": {
+      "custom_values": ["SamplexPath", "/flight/data", "/service/info"],
+      "selection_strategy": "sequential"
+    },
+    "ruleId": {
+      "custom_values": ["ruleId123456", "ruleId789012", "ruleId345678"],
+      "selection_strategy": "sequential"
+    },
+    "destinationRuleId": {
+      "custom_values": ["destinationRuleId123456", "destinationRuleId789012"],
+      "selection_strategy": "sequential"
     }
   },
   "global_overrides": {
     "use_realistic_data": true,
-    "preserve_structure": true
-  },
-  "custom_data_sets": {
-    "flight_data": {
-      "airlines": ["AA", "UA", "DL", "WN", "B6", "AS", "NK"],
-      "airports": ["NYC", "LAX", "CHI", "MIA", "SEA", "DFW", "ATL"],
-      "cabin_classes": ["Y", "C", "F", "W"]
-    },
-    "passenger_data": {
-      "titles": ["Mr", "Ms", "Mrs", "Dr", "Prof"],
-      "first_names": ["John", "Jane", "Michael", "Sarah", "David", "Emily", "Robert", "Lisa"],
-      "last_names": ["Doe", "Smith", "Johnson", "Williams", "Brown", "Davis", "Miller", "Wilson"]
-    }
+    "preserve_structure": true,
+    "default_string_length": 50
   }
 }

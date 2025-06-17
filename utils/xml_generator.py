@@ -16,6 +16,9 @@ from collections import deque
 from config import get_config
 from .type_generators import TypeGeneratorFactory
 from .xsd_type_resolver import UniversalXSDTypeResolver
+from .data_context_manager import DataContextManager
+from .smart_relationships_engine import SmartRelationshipsEngine
+from .template_processor import TemplateProcessor
 
 
 class IterativeConstraintExtractor:
@@ -179,13 +182,14 @@ class IterativeConstraintExtractor:
 class XMLGenerator:
     """Universal class for generating dummy XML files from any XSD schema with deep recursive parsing."""
     
-    def __init__(self, xsd_path: str, config_instance=None):
+    def __init__(self, xsd_path: str, config_instance=None, config_data: Dict[str, Any] = None):
         """
         Initialize the universal XML generator.
         
         Args:
             xsd_path: Path to the XSD schema file
             config_instance: Configuration instance (uses global config if None)
+            config_data: Enhanced configuration data with new features
         """
         self.xsd_path = xsd_path
         self.schema = None
@@ -194,6 +198,23 @@ class XMLGenerator:
         self.type_factory = TypeGeneratorFactory(self.config)  # Initialize type generator factory
         self.constraint_extractor = None  # Will be initialized after schema loading
         self.type_resolver = None  # Universal XSD type resolver
+        
+        # Initialize new configuration system components
+        self.config_data = config_data or {}
+        self.data_context_manager = DataContextManager(self.config_data.get('data_contexts', {}))
+        self.smart_relationships = SmartRelationshipsEngine(
+            self.config_data.get('smart_relationships', {}),
+            self.data_context_manager
+        )
+        self.template_processor = TemplateProcessor(
+            self.data_context_manager,
+            self.config_data.get('generation_settings', {}).get('deterministic_seed')
+        )
+        
+        # Enhanced element configurations
+        self.element_configs = self.config_data.get('element_configs', {})
+        self.generation_settings = self.config_data.get('generation_settings', {})
+        
         self._load_schema()
     
     def _load_schema(self) -> None:
@@ -311,7 +332,7 @@ class XMLGenerator:
     
     def _get_custom_value(self, element_name: str, current_path: str = "") -> Any:
         """
-        Get custom value from configuration for the given element.
+        Legacy method - now delegates to enhanced configuration system.
         
         Args:
             element_name: Name of the element
@@ -319,6 +340,90 @@ class XMLGenerator:
             
         Returns:
             Custom value if found, None otherwise
+        """
+        return self._get_enhanced_value(element_name, instance_index=0)
+    
+    def _get_enhanced_value(self, element_name: str, type_name: Any = None, instance_index: int = 0, context_values: Dict[str, Any] = None) -> Any:
+        """
+        Get value using enhanced configuration system.
+        
+        Args:
+            element_name: Name of the element
+            type_name: XSD type object
+            instance_index: Index of the current instance
+            context_values: Current context values from related elements
+            
+        Returns:
+            Enhanced value if found, None otherwise
+        """
+        context_values = context_values or {}
+        
+        # Clean element name (remove namespace prefix)
+        clean_element_name = element_name.split(':')[-1] if ':' in element_name else element_name
+        
+        # Check if element has configuration
+        element_config = self.element_configs.get(clean_element_name, {})
+        
+        # 1. Try smart relationships first
+        relationship_value = self.smart_relationships.apply_relationship(
+            clean_element_name, instance_index, context_values
+        )
+        if relationship_value is not None:
+            return relationship_value
+        
+        # 2. Try template-based generation
+        if 'template_source' in element_config:
+            template_value = self.template_processor.process_template(
+                element_config['template_source'], instance_index, clean_element_name
+            )
+            if template_value is not None:
+                return template_value
+        
+        # 3. Try data context references
+        if 'data_context' in element_config:
+            context_value = self.data_context_manager.resolve_data_reference(
+                element_config['data_context']
+            )
+            if context_value is not None:
+                return self._select_value_from_context(context_value, element_config, instance_index)
+        
+        # 4. Try custom values with selection strategy
+        if 'custom_values' in element_config:
+            custom_values = element_config['custom_values']
+            selection_strategy = element_config.get('selection_strategy', 'random')
+            return self._select_value_with_strategy(custom_values, selection_strategy, instance_index)
+        
+        # 5. Fallback to legacy custom_values method
+        return self._get_custom_value_legacy(element_name)
+    
+    def _select_value_from_context(self, context_value: Any, element_config: Dict[str, Any], instance_index: int) -> Any:
+        """Select value from data context with proper strategy."""
+        if isinstance(context_value, list):
+            selection_strategy = element_config.get('selection_strategy', 'random')
+            return self._select_value_with_strategy(context_value, selection_strategy, instance_index)
+        
+        return context_value
+    
+    def _select_value_with_strategy(self, values: List[Any], strategy: str, instance_index: int) -> Any:
+        """Select value from list using specified strategy."""
+        if not values:
+            return None
+        
+        if strategy == 'sequential':
+            return values[instance_index % len(values)]
+        elif strategy == 'seeded':
+            # Use deterministic selection based on instance index
+            import random
+            seed_value = self.generation_settings.get('deterministic_seed', 12345)
+            random.seed(seed_value + instance_index)
+            return random.choice(values)
+        else:  # 'random' or default
+            import random
+            return random.choice(values)
+    
+    def _get_custom_value_legacy(self, element_name: str, current_path: str = "") -> Any:
+        """
+        Legacy method for getting custom values (backward compatibility).
         """
         if not hasattr(self, 'custom_values') or not self.custom_values:
             return None
