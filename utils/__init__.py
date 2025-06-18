@@ -1,5 +1,5 @@
 """
-Utilities Package for XML Chunker
+Utilities Package for XML Wizard
 
 This package contains core utility modules that provide fundamental functionality:
 

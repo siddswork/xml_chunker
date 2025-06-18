@@ -1,5 +1,5 @@
 """
-XSLT Processing Service for XML Chunker.
+XSLT Processing Service for XML Wizard.
 
 This module handles XSLT transformations on XML content, including
 batch processing, equivalence testing, and canonical comparison.

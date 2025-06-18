@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AMA_ConnectivityLayerRQ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                        xsi:noNamespaceSchemaLocation="../input_xsd/AMA_ConnectivityLayerRQ.xsd">
+    <Requests>
+        <Request>
+            <target>HotelBooking</target>
+            <id>REQ002</id>
+            <action>Create</action>
+            <property>
+                <key>guest_count</key>
+                <value>2</value>
+            </property>
+            <property>
+                <key>checkin_date</key>
+                <value>2024-02-01</value>
+            </property>
+            <property>
+                <key>checkout_date</key>
+                <value>2024-02-05</value>
+            </property>
+            <property>
+                <key>hotel_city</key>
+                <value>Paris</value>
+            </property>
+            <set>
+                <hotel>
+                    <hotel_code>HTL001</hotel_code>
+                    <hotel_name>Grand Hotel Paris</hotel_name>
+                    <room_type>Deluxe</room_type>
+                    <rate_plan>BAR</rate_plan>
+                </hotel>
+                <guests>
+                    <guest>
+                        <title>Mr</title>
+                        <first_name>Robert</first_name>
+                        <last_name>Johnson</last_name>
+                        <email>robert.johnson@email.com</email>
+                        <loyalty_program>Gold</loyalty_program>
+                    </guest>
+                    <guest>
+                        <title>Mrs</title>
+                        <first_name>Sarah</first_name>
+                        <last_name>Johnson</last_name>
+                        <email>sarah.johnson@email.com</email>
+                        <special_requests>Non-smoking room</special_requests>
+                    </guest>
+                </guests>
+            </set>
+        </Request>
+    </Requests>
+</AMA_ConnectivityLayerRQ>

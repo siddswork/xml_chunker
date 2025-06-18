@@ -1,7 +1,7 @@
 """
-XML Chunker - Main Streamlit Application
+XML Wizard - Main Streamlit Application
 
-This is the main entry point for the XML Chunker application, a modular Streamlit 
+This is the main entry point for the XML Wizard application, a modular Streamlit 
 interface for parsing XSD schemas and generating compliant dummy XML files.
 
 The application specializes in IATA NDC (New Distribution Capability) XSD schemas, 
@@ -21,12 +21,13 @@ This module serves as the presentation layer, orchestrating the following servic
 - SchemaAnalyzer: XSD schema analysis and structure extraction
 - XMLGenerator: Universal XML generation engine
 
-Author: XML Chunker Development Team
+Author: XML Wizard Development Team
 License: MIT
 """
 
 import streamlit as st
 import io
+import json
 import os
 import tempfile
 from utils.xml_generator import XMLGenerator
@@ -37,6 +38,7 @@ from services.file_manager import FileManager
 from services.xml_validator import XMLValidator
 from services.schema_analyzer import SchemaAnalyzer
 from services.xslt_processor import XSLTProcessor
+from utils.config_manager import ConfigManager
 
 # Initialize configuration and services
 config = get_config()
@@ -44,6 +46,7 @@ file_manager = FileManager(config)
 xml_validator = XMLValidator(config)
 schema_analyzer = SchemaAnalyzer(config)
 xslt_processor = XSLTProcessor(config)
+config_manager = ConfigManager(config)
 
 st.set_page_config(
     page_title=config.ui.default_page_title,
@@ -328,7 +331,7 @@ def validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name=N
     """
     return xml_validator.validate_xml_against_schema(xml_content, xsd_file_path, uploaded_file_name, uploaded_file_content)
 
-def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, unbounded_counts=None, generation_mode="Minimalistic", optional_selections=None):
+def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, unbounded_counts=None, generation_mode="Minimalistic", optional_selections=None, custom_values=None):
     """
     Generate XML from XSD schema with user-specified choices and generation mode.
     
@@ -339,25 +342,40 @@ def generate_xml_from_xsd(xsd_file_path, xsd_file_name, selected_choices=None, u
         unbounded_counts: Dictionary of counts for unbounded elements
         generation_mode: Generation strategy ("Minimalistic", "Complete", "Custom")
         optional_selections: List of optional element paths to include (for Custom mode)
+        custom_values: Dictionary of custom values for specific elements
         
     Returns:
         Generated XML content
     """
     try:
+        # Setup dependencies
         file_manager.setup_temp_directory_with_dependencies(xsd_file_path, xsd_file_name)
-        generator = XMLGenerator(xsd_file_path)
+        
+        # Check if we have enhanced configuration data
+        enhanced_config = st.session_state.get('enhanced_config_data')
+        
+        # Create XMLGenerator with progress indication
+        if enhanced_config:
+            # Small delay to show the spinner before heavy processing
+            import time
+            time.sleep(0.1)
+        
+        generator = XMLGenerator(xsd_file_path, config_data=enhanced_config)
         
         # Pass user selections and generation mode to generator
         return generator.generate_dummy_xml_with_options(
             selected_choices=selected_choices, 
             unbounded_counts=unbounded_counts,
             generation_mode=generation_mode,
-            optional_selections=optional_selections
+            optional_selections=optional_selections,
+            custom_values=custom_values
         )
     except Exception as e:
+        error_msg = f"Error generating XML: {str(e)}"
+        print(f"XMLGenerator Error: {error_msg}")  # Log for debugging
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <error>
-  <message>Error generating XML: {str(e)}</message>
+  <message>{error_msg}</message>
 </error>"""
 
 def render_file_upload_section():
@@ -588,6 +606,101 @@ def render_unbounded_elements(unbounded_elements):
     
     return unbounded_counts
 
+def render_config_file_section():
+    """Render configuration file upload/export section."""
+    st.markdown("#### 📁 Configuration File")
+    
+    col_config1, col_config2 = st.columns(2)
+    
+    with col_config1:
+        st.markdown("**Import Configuration**")
+        uploaded_config = st.file_uploader(
+            "Upload configuration file",
+            type=["json"],
+            key="config_upload",
+            help="Upload a JSON configuration file to auto-populate settings"
+        )
+        
+        if uploaded_config:
+            try:
+                # Show loading indicator
+                with st.spinner("📋 Loading configuration..."):
+                    config_content = uploaded_config.getvalue().decode("utf-8")
+                    config_data = config_manager.load_config(io.StringIO(config_content))
+                
+                # Store enhanced configuration data
+                st.session_state['enhanced_config_data'] = config_data
+                
+                # Convert to generator options and store in session state (for backward compatibility)
+                with st.spinner("🔄 Processing configuration..."):
+                    generator_options = config_manager.convert_config_to_generator_options(config_data)
+                
+                st.session_state['selected_choices'] = generator_options.get('selected_choices', {})
+                st.session_state['unbounded_counts'] = generator_options.get('unbounded_counts', {})
+                st.session_state['current_generation_mode'] = generator_options.get('generation_mode', 'Minimalistic')
+                st.session_state['optional_element_selections'] = generator_options.get('optional_selections', [])
+                st.session_state['custom_values'] = generator_options.get('custom_values', {})
+                
+                st.success(f"✅ Configuration loaded: {config_data['metadata']['name']}")
+                
+                # Show configuration summary
+                if 'data_contexts' in config_data:
+                    context_names = list(config_data['data_contexts'].keys())
+                    st.info(f"📊 Enhanced configuration with {len(context_names)} data contexts: {', '.join(context_names)}")
+                
+                # Show warnings if any
+                schema_name = st.session_state.get('uploaded_file_name', '')
+                warnings = config_manager.validate_config_compatibility(config_data, schema_name)
+                if warnings:
+                    for warning in warnings:
+                        st.warning(f"⚠️ {warning}")
+
+                # Mark that configuration has been loaded
+                st.session_state['config_loaded'] = True
+                
+            except Exception as e:
+                st.error(f"❌ Error loading configuration: {str(e)}")
+    
+    with col_config2:
+        st.markdown("**Export Current Settings**")
+        
+        if st.button("📤 **Export Configuration**", key="export_config_btn", use_container_width=True):
+            try:
+                # Get current settings from session state
+                selected_choices = st.session_state.get('selected_choices', {})
+                unbounded_counts = st.session_state.get('unbounded_counts', {})
+                generation_mode = st.session_state.get('current_generation_mode', 'Minimalistic')
+                optional_selections = st.session_state.get('optional_element_selections', [])
+                schema_name = st.session_state.get('uploaded_file_name', 'unknown.xsd')
+                
+                # Create configuration
+                config_data = config_manager.create_config_from_ui_state(
+                    schema_name=schema_name,
+                    generation_mode=generation_mode,
+                    selected_choices=selected_choices,
+                    unbounded_counts=unbounded_counts,
+                    optional_selections=optional_selections,
+                    config_name=f"Configuration for {schema_name}",
+                    config_description=f"Auto-generated configuration for {schema_name} with {generation_mode} mode"
+                )
+                
+                # Offer download
+                config_json = json.dumps(config_data, indent=2, ensure_ascii=False)
+                config_filename = f"{schema_name.replace('.xsd', '')}_config.json"
+                
+                st.download_button(
+                    label="💾 **Download Configuration**",
+                    data=config_json,
+                    file_name=config_filename,
+                    mime="application/json",
+                    use_container_width=True
+                )
+                
+                st.success("✅ Configuration ready for download!")
+                
+            except Exception as e:
+                st.error(f"❌ Error creating configuration: {str(e)}")
+
 def render_tab2_configure_generation():
     """Render Tab 2: Configure Generation content."""
     st.markdown("### ⚙️ Generation Configuration")
@@ -602,6 +715,11 @@ def render_tab2_configure_generation():
     choices = analysis['choices']
     unbounded_elements = analysis['unbounded_elements']
     element_tree = analysis['element_tree']
+    
+    # Configuration file section
+    render_config_file_section()
+    
+    st.markdown("---")
     
     # XML Generation Mode Selection
     st.markdown("#### 🎯 Generation Strategy")
@@ -930,9 +1048,21 @@ def render_tab3_generate_validate():
             use_container_width=True
         )
     
+    # Check if we should auto-generate XML after config load
+    auto_generate = st.session_state.get('config_loaded', False) and st.session_state.get('enhanced_config_data') and not st.session_state.get('auto_generated_completed', False)
+    
     # Handle XML generation
-    if generate_clicked:
-        with st.spinner("🔄 Generating XML with your configuration..."):
+    if generate_clicked or auto_generate:
+        enhanced_config = st.session_state.get('enhanced_config_data')
+        if enhanced_config:
+            if auto_generate:
+                spinner_msg = "🚀 Auto-generating XML with enhanced configuration..."
+            else:
+                spinner_msg = "🚀 Generating XML with enhanced configuration (loading schema & applying data contexts)..."
+        else:
+            spinner_msg = "🔄 Generating XML (loading schema & processing structure)..."
+            
+        with st.spinner(spinner_msg):
             # Get user selections from session state
             selected_choices = st.session_state.get('selected_choices', {})
             unbounded_counts = st.session_state.get('unbounded_counts', {})
@@ -942,17 +1072,25 @@ def render_tab3_generate_validate():
             temp_file_path = st.session_state.get('temp_file_path')
             file_name = st.session_state.get('uploaded_file_name')
             
+            custom_values = st.session_state.get('custom_values', {})
+            
             xml_content = generate_xml_from_xsd(
                 temp_file_path, 
                 file_name, 
                 selected_choices, 
                 unbounded_counts,
                 generation_mode,
-                optional_selections
+                optional_selections,
+                custom_values
             )
             
             # Store XML content for validation and download
             st.session_state['generated_xml'] = xml_content
+            
+            # Mark auto-generation as completed if it was triggered
+            if auto_generate:
+                st.session_state['auto_generated_completed'] = True
+                st.session_state['config_loaded'] = False  # Reset flag
     
     # Display generated XML if available
     if 'generated_xml' in st.session_state and st.session_state['generated_xml']:

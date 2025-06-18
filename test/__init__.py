@@ -1,5 +1,5 @@
 """
-Test Suite for XML Chunker
+Test Suite for XML Wizard
 
 This package contains comprehensive tests for all application components:
 

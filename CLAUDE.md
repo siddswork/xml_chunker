@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-XML Chunker is a Streamlit application for parsing XSD schemas and generating dummy XML files. The application processes IATA NDC (New Distribution Capability) XSD schemas, analyzes their structure (including choice elements), and creates valid XML instances with sample data.
+XML Wizard is a Streamlit application for parsing XSD schemas and generating dummy XML files. The application processes IATA NDC (New Distribution Capability) XSD schemas, analyzes their structure (including choice elements), and creates valid XML instances with sample data.
 
 ## Common Commands
 

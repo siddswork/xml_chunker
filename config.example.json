@@ -85,7 +85,7 @@
     "max_file_size_mb": 50
   },
   "ui": {
-    "default_page_title": "XML Chunker",
+    "default_page_title": "XML Wizard",
     "max_file_upload_mb": 10,
     "default_tree_depth": 4,
     "show_debug_info": false,

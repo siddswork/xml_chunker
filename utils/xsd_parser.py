@@ -1,5 +1,5 @@
 """
-XSD Parser module for XML Chunker.
+XSD Parser module for XML Wizard.
 
 This module provides utilities for parsing XSD schema files.
 """

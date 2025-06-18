@@ -1,5 +1,5 @@
 """
-XML Validation Service for XML Chunker.
+XML Validation Service for XML Wizard.
 
 This module handles XML validation against XSD schemas, including
 error categorization and detailed validation reporting.

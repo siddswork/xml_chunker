@@ -1,5 +1,5 @@
 """
-Pytest configuration and fixtures for XML Chunker tests.
+Pytest configuration and fixtures for XML Wizard tests.
 """
 
 import os

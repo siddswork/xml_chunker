@@ -1,0 +1,81 @@
+{
+  "metadata": {
+    "name": "Configuration for AMA_ConnectivityLayerRQ.xsd",
+    "description": "Auto-generated configuration for AMA_ConnectivityLayerRQ.xsd with Complete mode",
+    "schema_name": "AMA_ConnectivityLayerRQ.xsd",
+    "created": "2025-06-17T00:12:09.030556",
+    "version": "1.0"
+  },
+  "generation_settings": {
+    "mode": "Complete",
+    "global_repeat_count": 2,
+    "max_depth": 10,
+    "include_comments": true
+  },
+  "element_configs": {
+    "product": {
+      "choices": {
+        "set": "ATM"
+      }
+    },
+    "PriceStructure": {
+      "choices": {
+        "QT_SALES": "Tax"
+      }
+    },
+    "Requests": {
+      "repeat_count": 2
+    },
+    "None": {
+      "repeat_count": 2
+    },
+    "Warning": {
+      "repeat_count": 2
+    },
+    "Error": {
+      "repeat_count": 2
+    },
+    "Price": {
+      "repeat_count": 2
+    },
+    "Tax": {
+      "repeat_count": 2
+    },
+    "Point": {
+      "repeat_count": 2
+    },
+    "Flag": {
+      "repeat_count": 2
+    },
+    "PricingInfo": {
+      "repeat_count": 2
+    },
+    "TicketingInfo": {
+      "repeat_count": 2
+    },
+    "Blob": {
+      "repeat_count": 2
+    },
+    "Stakeholders": {
+      "repeat_count": 2
+    },
+    "Booking": {
+      "repeat_count": 2
+    },
+    "Offer": {
+      "repeat_count": 2
+    },
+    "TravelRequests": {
+      "repeat_count": 2
+    },
+    "Sales": {
+      "repeat_count": 2
+    },
+    "Remarks": {
+      "repeat_count": 2
+    }
+  },
+  "global_overrides": {
+    "use_realistic_data": true
+  }
+}
