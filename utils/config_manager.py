@@ -1,5 +1,5 @@
 """
-Configuration Manager for XML Chunker.
+Configuration Manager for XML Wizard.
 
 Handles loading, validation, and processing of JSON configuration files
 that define XML generation parameters, element values, choices, and repeat counts.

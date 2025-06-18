@@ -65,12 +65,12 @@ Let's start with the simplest possible configuration:
 ### How XML Generation Works
 
 ```
-XSD Schema → JSON Config → XML Chunker → Generated XML
+XSD Schema → JSON Config → XML Wizard → Generated XML
 ```
 
 1. **XSD Schema**: Defines the structure (what elements are allowed)
 2. **JSON Config**: Your instructions (what data to put in those elements)
-3. **XML Chunker**: The engine that follows your instructions
+3. **XML Wizard**: The engine that follows your instructions
 4. **Generated XML**: Your custom XML with the data you specified
 
 ### Key Concepts (The Big 4)

@@ -1,7 +1,7 @@
 """
-XML Chunker - Main Streamlit Application
+XML Wizard - Main Streamlit Application
 
-This is the main entry point for the XML Chunker application, a modular Streamlit 
+This is the main entry point for the XML Wizard application, a modular Streamlit 
 interface for parsing XSD schemas and generating compliant dummy XML files.
 
 The application specializes in IATA NDC (New Distribution Capability) XSD schemas, 
@@ -21,7 +21,7 @@ This module serves as the presentation layer, orchestrating the following servic
 - SchemaAnalyzer: XSD schema analysis and structure extraction
 - XMLGenerator: Universal XML generation engine
 
-Author: XML Chunker Development Team
+Author: XML Wizard Development Team
 License: MIT
 """
 

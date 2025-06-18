@@ -1,5 +1,5 @@
 """
-File Management Service for XML Chunker.
+File Management Service for XML Wizard.
 
 This module handles file operations including temporary directory management,
 XSD dependency resolution, and file copying operations.

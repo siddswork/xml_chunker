@@ -1,4 +1,4 @@
-# XML Chunker
+# XML Wizard
 
 A modular Streamlit application for parsing XSD schemas and generating compliant dummy XML files. The application specializes in IATA NDC (New Distribution Capability) XSD schemas, providing advanced analysis, choice element handling, and validation-aware XML generation.
 
@@ -25,8 +25,8 @@ A modular Streamlit application for parsing XSD schemas and generating compliant
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/siddswork/xml_chunker.git
-cd xml_chunker
+git clone https://github.com/siddswork/xml_wizard.git
+cd xml_wizard
 ```
 
 2. Create a virtual environment and install dependencies:
@@ -82,7 +82,7 @@ For example, you can upload the `IATA_OrderCreateRQ.xsd` or `IATA_OrderViewRS.xs
 ## Project Structure
 
 ```
-xml_chunker/
+xml_wizard/
 ├── app.py                      # Main Streamlit application (UI orchestration)
 ├── config.py                   # Configuration management
 ├── services/                   # Modular business logic services

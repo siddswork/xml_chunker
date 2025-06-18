@@ -795,8 +795,8 @@ def main():
     """Main function to run the standalone debugger with comprehensive comparison."""
     
     # File paths
-    xsd_path = "/home/sidd/dev/xml_chunker/resource/orderCreate/input_xsd/AMA_ConnectivityLayerRQ.xsd"
-    json_path = "/home/sidd/dev/xml_chunker/resource/orderCreate/test_data_config/sample_input_config.json"
+    xsd_path = "/home/sidd/dev/xml_wizard/resource/orderCreate/input_xsd/AMA_ConnectivityLayerRQ.xsd"
+    json_path = "/home/sidd/dev/xml_wizard/resource/orderCreate/test_data_config/sample_input_config.json"
     
     print("🔧 XML Generation Standalone Debugger with Comprehensive Analysis")
     print(f"XSD File: {xsd_path}")

@@ -1,5 +1,5 @@
 """
-Services Package for XML Chunker
+Services Package for XML Wizard
 
 This package contains the business logic services that handle core functionality
 with clean separation of concerns:

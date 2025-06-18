@@ -1,5 +1,5 @@
 """
-Universal XML Generator module for XML Chunker.
+Universal XML Generator module for XML Wizard.
 
 This module provides utilities for generating dummy XML files from ANY XSD schema
 with deep recursive parsing, proper choice handling, and deterministic values.

@@ -1,5 +1,5 @@
 """
-Schema Analysis Service for XML Chunker.
+Schema Analysis Service for XML Wizard.
 
 This module provides comprehensive XSD schema analysis including
 choice element detection, unbounded element identification, and
