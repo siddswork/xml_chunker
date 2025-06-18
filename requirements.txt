@@ -3,6 +3,7 @@ streamlit>=1.24.0
 lxml>=4.9.2
 xmlschema>=2.3.0
 streamlit-tree-select>=0.0.5
+jsonschema>=4.0.0
 
 # Testing dependencies
 pytest>=7.0.0
