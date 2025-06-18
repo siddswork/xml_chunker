@@ -1235,6 +1235,10 @@ class XMLGenerator:
             # Process simple types
             if element.type.is_simple():
                 value = self._generate_value_for_type(element.type, element.local_name, current_path)
+                # Debug problematic elements
+                if element.local_name in ['CurrencyCode', 'IATA_Number', 'EmailAddress', 'PhoneNumber']:
+                    print(f"DEBUG: Simple type {element.local_name} generated value: {repr(value)}")
+                
                 # Ensure no elements return empty values - use type-aware fallbacks
                 if value is None or value == "":
                     if self.type_resolver and element.type:
@@ -1255,6 +1259,21 @@ class XMLGenerator:
             
             # Process complex types
             if element.type.is_complex():
+                # CRITICAL FIX: Handle empty sequence groups that should generate text content
+                # Some complex types are defined with empty sequence groups but should contain text
+                # This fixes elements like CurrencyCode, IATA_Number, EmailAddress, PhoneNumber appearing as empty self-closing tags
+                if (hasattr(element.type, 'content') and element.type.content is not None and 
+                    hasattr(element.type.content, 'model') and element.type.content.model == 'sequence' and
+                    hasattr(element.type.content, 'iter_elements')):
+                    try:
+                        elements = list(element.type.content.iter_elements())
+                        if len(elements) == 0:
+                            # Empty sequence - should generate text content instead of complex structure
+                            text_gen = self.type_factory.create_generator("string", {}, element.local_name)
+                            generated_value = text_gen.generate(element.local_name, {})
+                            return generated_value
+                    except:
+                        pass  # Fallback to regular complex type processing
                 # Process attributes
                 if hasattr(element.type, 'attributes') and element.type.attributes:
                     for attr_name, attr in element.type.attributes.items():
