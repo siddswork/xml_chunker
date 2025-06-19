@@ -6,11 +6,11 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from typing import Optional
 
-from src.config.settings import settings
-from src.tools.file_tools import FileManager
-from src.agents.xslt_analyzer import XSLTAnalyzerAgent
-from src.agents.xsd_analyzer import XSDAnalyzerAgent 
-from src.agents.test_case_generator import TestCaseGeneratorAgent
+from xslt_test_generator.config.settings import settings
+from xslt_test_generator.tools.file_tools import FileManager
+from xslt_test_generator.agents.xslt_analyzer import XSLTAnalyzerAgent
+from xslt_test_generator.agents.xsd_analyzer import XSDAnalyzerAgent 
+from xslt_test_generator.agents.test_case_generator import TestCaseGeneratorAgent
 
 app = typer.Typer(help="XSLT Test Generator - Generate comprehensive test cases for XSLT transformations")
 console = Console()

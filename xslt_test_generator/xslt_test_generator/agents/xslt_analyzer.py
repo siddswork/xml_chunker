@@ -1,9 +1,9 @@
 """XSLT Analyzer Agent using CrewAI."""
 
 from crewai import Agent
-from src.config.settings import settings
-from src.tools.llm_client import llm_client
-from src.tools.xml_tools import XSLTAnalyzer
+from xslt_test_generator.config.settings import settings
+from xslt_test_generator.tools.llm_client import llm_client
+from xslt_test_generator.tools.xml_tools import XSLTAnalyzer
 
 class XSLTAnalyzerAgent:
     """Agent specialized in analyzing XSLT transformations."""

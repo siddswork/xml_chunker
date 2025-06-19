@@ -2,7 +2,7 @@
 
 import litellm
 from typing import Dict, Any, List, Optional
-from src.config.settings import settings
+from xslt_test_generator.config.settings import settings
 
 class LLMClient:
     """Unified LLM client supporting multiple providers."""

@@ -5,7 +5,7 @@ llm:
   default_provider: "openai"
   models:
     openai:
-      model: "gpt-4"
+      model: "gpt-4o-mini"
       temperature: 0.3
       max_tokens: 4000
     anthropic:
