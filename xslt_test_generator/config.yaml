@@ -1,0 +1,53 @@
+# XSLT Test Generator Configuration
+
+# LLM Configuration
+llm:
+  default_provider: "openai"
+  models:
+    openai:
+      model: "gpt-4"
+      temperature: 0.3
+      max_tokens: 4000
+    anthropic:
+      model: "claude-3-sonnet-20240229" 
+      temperature: 0.3
+      max_tokens: 4000
+    google:
+      model: "gemini-pro"
+      temperature: 0.3
+      max_tokens: 4000
+
+# Agent Configuration
+agents:
+  xslt_analyzer:
+    role: "XSLT Transformation Specialist"
+    goal: "Analyze XSLT files to identify transformation patterns, business rules, and testable scenarios"
+    verbose: true
+    max_retries: 2
+    
+  xsd_analyzer:
+    role: "XML Schema Specialist"
+    goal: "Analyze XSD schemas to understand input structure, constraints, and validation rules"
+    verbose: true
+    max_retries: 2
+    
+  test_case_generator:
+    role: "Test Case Architect"
+    goal: "Generate comprehensive Gherkin test scenarios based on XSLT and XSD analysis"
+    verbose: true
+    max_retries: 2
+
+# Output Configuration
+output:
+  format: "gherkin"
+  file_extension: ".feature"
+  include_metadata: true
+  
+# Evaluation Configuration
+evaluation:
+  enabled: true
+  metrics:
+    - "relevancy"
+    - "coherence" 
+    - "completeness"
+  threshold: 0.7
