@@ -1,0 +1,18 @@
+# Agentic XSLT Test Generator Requirements
+
+# Core dependencies
+openai>=1.0.0
+lxml>=4.9.0
+pathlib2>=2.3.0
+
+# Optional dependencies for enhanced functionality
+asyncio-compat>=0.1.0
+pydantic>=2.0.0
+
+# Development and testing (optional)
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+isort>=5.12.0
+
+# Note: For Phase 1 demo, only openai and lxml are strictly required
