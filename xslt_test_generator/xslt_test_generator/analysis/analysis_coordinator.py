@@ -43,9 +43,30 @@ class AnalysisCoordinator(LoggerMixin):
                 self.logger.info(f"Analysis already completed for {file_path}")
                 return self._load_existing_analysis(file_record['id'])
             
+            # Create file record if it doesn't exist
+            if not file_record:
+                self.logger.info(f"Creating new file record for {file_path}")
+                
+                # Get file information
+                import hashlib
+                import os
+                
+                file_obj = Path(file_path)
+                if not file_obj.exists():
+                    raise FileNotFoundError(f"XSLT file not found: {file_path}")
+                
+                # Calculate content hash
+                with open(file_path, 'rb') as f:
+                    content_hash = hashlib.sha256(f.read()).hexdigest()
+                
+                file_size = file_obj.stat().st_size
+                last_modified = datetime.fromtimestamp(file_obj.stat().st_mtime).isoformat()
+                
+                file_id = self.db.insert_file(file_path, 'xslt', content_hash, file_size, last_modified)
+                file_record = {'id': file_id, 'file_path': file_path, 'file_type': 'xslt'}
+            
             # Update status to analyzing
-            if file_record:
-                self.db.update_file_analysis_status(file_record['id'], 'analyzing')
+            self.db.update_file_analysis_status(file_record['id'], 'analyzing')
             
             # Phase 1: Template Parsing
             self.logger.info("Phase 1: Parsing XSLT templates and variables")
@@ -194,16 +215,73 @@ class AnalysisCoordinator(LoggerMixin):
     
     def _load_existing_analysis(self, file_id: int) -> Dict[str, Any]:
         """Load existing analysis results from database."""
-        # This would load stored analysis results
-        # For now, return a simplified version
-        templates = self.db.get_templates_by_file(file_id)
+        # Get file record to retrieve file path
+        file_record = self.db.get_file_by_id(file_id)
+        file_path = file_record['file_path'] if file_record else 'unknown'
         
+        # Load stored analysis results
+        templates = self.db.get_templates_by_file(file_id)
+        variables = self.db.get_variables_by_file(file_id)
+        execution_paths = self.db.get_execution_paths_by_file(file_id)
+        
+        # Convert database records back to objects for consistency
+        template_objects = {}
+        for template_data in templates:
+            from .template_parser import XSLTTemplate
+            # Convert sqlite3.Row to dict for easier access
+            template_dict = dict(template_data)
+            
+            template_obj = XSLTTemplate(
+                name=template_dict.get('name', ''),
+                match_pattern=template_dict.get('match_pattern', ''),
+                mode=template_dict.get('mode', ''),
+                priority=template_dict.get('priority', 0),
+                line_start=template_dict.get('line_start', 0),
+                line_end=template_dict.get('line_end', 0),
+                template_content=template_dict.get('template_content', ''),
+                calls_templates=json.loads(template_dict.get('calls_templates', '[]')) if isinstance(template_dict.get('calls_templates'), str) else template_dict.get('calls_templates', []),
+                called_by_templates=json.loads(template_dict.get('called_by_templates', '[]')) if isinstance(template_dict.get('called_by_templates'), str) else template_dict.get('called_by_templates', []),
+                uses_variables=json.loads(template_dict.get('uses_variables', '[]')) if isinstance(template_dict.get('uses_variables'), str) else template_dict.get('uses_variables', []),
+                defines_variables=json.loads(template_dict.get('defines_variables', '[]')) if isinstance(template_dict.get('defines_variables'), str) else template_dict.get('defines_variables', []),
+                xpath_expressions=json.loads(template_dict.get('xpath_expressions', '[]')) if isinstance(template_dict.get('xpath_expressions'), str) else template_dict.get('xpath_expressions', []),
+                conditional_logic=json.loads(template_dict.get('conditional_logic', '[]')) if isinstance(template_dict.get('conditional_logic'), str) else template_dict.get('conditional_logic', []),
+                output_elements=json.loads(template_dict.get('output_elements', '[]')) if isinstance(template_dict.get('output_elements'), str) else template_dict.get('output_elements', []),
+                template_hash=template_dict.get('template_hash', ''),
+                complexity_score=template_dict.get('complexity_score', 0),
+                is_recursive=template_dict.get('is_recursive', False)
+            )
+            template_objects[template_obj.name] = template_obj
+        
+        # Build complete analysis results structure
         return {
             'analysis_id': f"existing_{file_id}",
-            'file_id': file_id,
-            'templates_count': len(templates),
-            'status': 'loaded_from_cache',
-            'note': 'Full analysis results would be loaded from database storage'
+            'file_path': file_path,
+            'template_analysis': {
+                'templates': template_objects,
+                'analysis_summary': {
+                    'total_templates': len(templates),
+                    'avg_complexity': sum(dict(t).get('complexity_score', 0) for t in templates) / len(templates) if templates else 0
+                }
+            },
+            'semantic_analysis': {
+                'semantic_patterns': [],  # Would be loaded from database
+                'transformation_hotspots': [],  # Would be loaded from database
+                'interaction_analysis': {
+                    'call_graph': {},
+                    'template_dependencies': {}
+                },
+                'analysis_summary': {}
+            },
+            'execution_analysis': {
+                'execution_paths': execution_paths,
+                'entry_points': [],  # Would be determined from analysis
+                'path_statistics': {}
+            },
+            'analysis_timestamp': datetime.now().isoformat(),
+            'summary': {
+                'status': 'loaded_from_cache',
+                'note': 'Analysis results loaded from database storage'
+            }
         }
     
     def _handle_analysis_error(self, file_record: Optional[Dict], error_message: str) -> None:

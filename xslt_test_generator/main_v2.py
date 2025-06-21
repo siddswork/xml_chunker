@@ -5,13 +5,14 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from typing import Optional
+from typing import Optional, List
 import time
 
 from xslt_test_generator.config.logging_config import setup_logging, get_logger
 from xslt_test_generator.database.connection import DatabaseManager
 from xslt_test_generator.core.file_discovery import FileDiscoveryEngine
 from xslt_test_generator.analysis.analysis_coordinator import AnalysisCoordinator
+from xslt_test_generator.cli.test_generator_cli import TestGeneratorCLI
 
 app = typer.Typer(help="XSLT Test Generator v2.0 - Enterprise-grade XSLT analysis and test generation")
 console = Console()
@@ -226,6 +227,106 @@ def status(
         
     except Exception as e:
         console.print(f"❌ Error getting status: {e}", style="red")
+        raise typer.Exit(1)
+
+
+@app.command()
+def generate_tests(
+    xslt_file: str = typer.Argument(..., help="Path to XSLT file"),
+    output_dir: str = typer.Option("generated_tests", "--output", "-o", help="Output directory for generated tests"),
+    formats: List[str] = typer.Option(["cucumber", "pytest", "json"], "--format", "-f", help="Output formats"),
+    force: bool = typer.Option(False, "--force", help="Force reanalysis"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    log_level: str = typer.Option("INFO", "--log-level", help="Logging level"),
+    log_to_file: bool = typer.Option(True, "--log-to-file/--no-log-to-file", help="Enable file logging")
+):
+    """Generate intelligent test cases for XSLT transformation using Phase 2 analysis."""
+    
+    # Initialize logging
+    setup_logging(
+        log_level=log_level.upper(),
+        log_to_file=log_to_file,
+        log_dir="logs",
+        enable_structured_logging=True
+    )
+    
+    global logger
+    logger = get_logger(__name__)
+    
+    xslt_path = Path(xslt_file)
+    if not xslt_path.exists():
+        console.print(f"❌ XSLT file not found: {xslt_file}", style="red")
+        raise typer.Exit(1)
+    
+    try:
+        # Initialize test generator CLI
+        test_cli = TestGeneratorCLI()
+        
+        # Generate tests
+        results = test_cli.generate_tests(
+            xslt_file=str(xslt_path),
+            output_dir=output_dir,
+            output_formats=formats,
+            force_reanalysis=force,
+            verbose=verbose
+        )
+        
+        console.print(f"\n🎉 Test generation completed successfully!", style="bold green")
+        console.print(f"📁 Generated {results['statistics']['total_scenarios']} test scenarios", style="green")
+        console.print(f"📂 Output directory: {results['output_directory']}", style="green")
+        
+        logger.info("Test generation completed successfully", extra={
+            "total_scenarios": results['statistics']['total_scenarios'],
+            "output_directory": results['output_directory']
+        })
+        
+    except Exception as e:
+        logger.error(f"Test generation failed: {e}", exc_info=True)
+        console.print(f"❌ Test generation failed: {e}", style="red")
+        raise typer.Exit(1)
+
+
+@app.command()
+def analyze_only(
+    xslt_file: str = typer.Argument(..., help="Path to XSLT file"),
+    force: bool = typer.Option(False, "--force", help="Force reanalysis"),
+    log_level: str = typer.Option("INFO", "--log-level", help="Logging level"),
+    log_to_file: bool = typer.Option(True, "--log-to-file/--no-log-to-file", help="Enable file logging")
+):
+    """Analyze XSLT transformation without generating tests."""
+    
+    # Initialize logging
+    setup_logging(
+        log_level=log_level.upper(),
+        log_to_file=log_to_file,
+        log_dir="logs",
+        enable_structured_logging=True
+    )
+    
+    global logger
+    logger = get_logger(__name__)
+    
+    xslt_path = Path(xslt_file)
+    if not xslt_path.exists():
+        console.print(f"❌ XSLT file not found: {xslt_file}", style="red")
+        raise typer.Exit(1)
+    
+    try:
+        # Initialize test generator CLI
+        test_cli = TestGeneratorCLI()
+        
+        # Run analysis only
+        results = test_cli.analyze_only(str(xslt_path), force_reanalysis=force)
+        
+        if 'error' not in results:
+            console.print(f"\n✅ Analysis completed successfully!", style="green")
+            logger.info("Analysis completed successfully")
+        else:
+            raise typer.Exit(1)
+            
+    except Exception as e:
+        logger.error(f"Analysis failed: {e}", exc_info=True)
+        console.print(f"❌ Analysis failed: {e}", style="red")
         raise typer.Exit(1)
 
 

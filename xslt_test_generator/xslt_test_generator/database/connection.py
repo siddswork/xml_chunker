@@ -193,6 +193,46 @@ class DatabaseManager(LoggerMixin):
         results = self.execute_query(query, (file_path,))
         return results[0] if results else None
     
+    def get_file_by_id(self, file_id: int) -> Optional[sqlite3.Row]:
+        """
+        Get file record by ID.
+        
+        Args:
+            file_id: ID of the file
+            
+        Returns:
+            File record or None if not found
+        """
+        query = "SELECT * FROM transformation_files WHERE id = ?"
+        results = self.execute_query(query, (file_id,))
+        return results[0] if results else None
+    
+    def get_variables_by_file(self, file_id: int) -> List[sqlite3.Row]:
+        """
+        Get all variables for a file.
+        
+        Args:
+            file_id: ID of the file
+            
+        Returns:
+            List of variable records
+        """
+        query = "SELECT * FROM xslt_variables WHERE file_id = ?"
+        return self.execute_query(query, (file_id,))
+    
+    def get_execution_paths_by_file(self, file_id: int) -> List[sqlite3.Row]:
+        """
+        Get all execution paths for a file.
+        
+        Args:
+            file_id: ID of the file
+            
+        Returns:
+            List of execution path records
+        """
+        query = "SELECT * FROM execution_paths WHERE entry_template_id IN (SELECT id FROM xslt_templates WHERE file_id = ?)"
+        return self.execute_query(query, (file_id,))
+    
     def update_file_analysis_status(self, file_id: int, status: str, error_message: str = None):
         """
         Update the analysis status of a file.
@@ -618,16 +658,41 @@ class DatabaseManager(LoggerMixin):
             tables_to_clear.extend(['file_dependencies', 'transformation_files'])
         
         with self.get_connection() as conn:
-            for table in tables_to_clear:
-                conn.execute(f"DELETE FROM {table}")
+            # Get list of existing tables
+            cursor = conn.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name NOT LIKE 'sqlite_%'
+            """)
+            existing_tables = {row[0] for row in cursor.fetchall()}
             
-            if keep_files:
+            # Only delete from tables that actually exist
+            deleted_count = 0
+            for table in tables_to_clear:
+                if table in existing_tables:
+                    try:
+                        cursor = conn.execute(f"DELETE FROM {table}")
+                        rows_deleted = cursor.rowcount
+                        if rows_deleted > 0:
+                            self.logger.info(f"Deleted {rows_deleted} records from {table}")
+                        deleted_count += rows_deleted
+                    except sqlite3.Error as e:
+                        self.logger.warning(f"Could not delete from {table}: {e}")
+                else:
+                    self.logger.debug(f"Table {table} does not exist, skipping")
+            
+            if keep_files and 'transformation_files' in existing_tables:
                 # Reset analysis status for files
-                conn.execute("""
-                    UPDATE transformation_files 
-                    SET analysis_status = 'pending', error_message = NULL
-                """)
+                try:
+                    cursor = conn.execute("""
+                        UPDATE transformation_files 
+                        SET analysis_status = 'pending', error_message = NULL
+                    """)
+                    updated_count = cursor.rowcount
+                    if updated_count > 0:
+                        self.logger.info(f"Reset analysis status for {updated_count} files")
+                except sqlite3.Error as e:
+                    self.logger.warning(f"Could not reset file status: {e}")
             
             conn.commit()
         
-        self.logger.info(f"Cleaned up analysis data, keep_files={keep_files}")
+        self.logger.info(f"Cleaned up analysis data, keep_files={keep_files}, total records deleted: {deleted_count}")

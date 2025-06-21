@@ -5,6 +5,14 @@ xmlschema>=2.3.0
 streamlit-tree-select>=0.0.5
 jsonschema>=4.0.0
 
+# Phase 2 Analysis Engine dependencies
+# (All analysis components use only Python standard library + existing deps)
+
+# LLM and AI agent dependencies (for hybrid analysis)
+crewai>=0.28.0
+litellm>=1.35.0
+
 # Testing dependencies
 pytest>=7.0.0
 pytest-cov>=4.0.0
+pytest-asyncio>=0.21.0
