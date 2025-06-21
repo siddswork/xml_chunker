@@ -3,8 +3,9 @@
 import litellm
 from typing import Dict, Any, List, Optional
 from xslt_test_generator.config.settings import settings
+from xslt_test_generator.config.logging_config import LoggerMixin, get_logger
 
-class LLMClient:
+class LLMClient(LoggerMixin):
     """Unified LLM client supporting multiple providers."""
     
     def __init__(self, provider: str = None):

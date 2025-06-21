@@ -2,9 +2,10 @@
 
 from crewai import Agent
 from xslt_test_generator.config.settings import settings
+from xslt_test_generator.config.logging_config import LoggerMixin, get_logger
 from xslt_test_generator.tools.llm_client import llm_client
 
-class TestCaseGeneratorAgent:
+class TestCaseGeneratorAgent(LoggerMixin):
     """Agent specialized in generating Gherkin test cases."""
     
     def __init__(self):

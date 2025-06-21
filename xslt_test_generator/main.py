@@ -7,6 +7,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from typing import Optional
 
 from xslt_test_generator.config.settings import settings
+from xslt_test_generator.config.logging_config import setup_logging, get_logger, log_agent_interaction
 from xslt_test_generator.tools.file_tools import FileManager
 from xslt_test_generator.agents.xslt_analyzer import XSLTAnalyzerAgent
 from xslt_test_generator.agents.xsd_analyzer import XSDAnalyzerAgent 
@@ -14,6 +15,7 @@ from xslt_test_generator.agents.test_case_generator import TestCaseGeneratorAgen
 
 app = typer.Typer(help="XSLT Test Generator - Generate comprehensive test cases for XSLT transformations")
 console = Console()
+logger = None  # Will be initialized after logging setup
 
 @app.command()
 def generate(
@@ -21,24 +23,51 @@ def generate(
     xsd_file: str = typer.Argument(..., help="Path to the XSD schema file"),
     output_dir: str = typer.Argument(..., help="Output directory for test cases"),
     llm_provider: Optional[str] = typer.Option(None, "--provider", "-p", help="LLM provider (openai, anthropic, google)"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output")
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
+    log_level: str = typer.Option("INFO", "--log-level", help="Logging level (DEBUG, INFO, WARNING, ERROR)"),
+    log_to_file: bool = typer.Option(True, "--log-to-file/--no-log-to-file", help="Enable/disable file logging")
 ):
     """Generate test cases for XSLT transformation."""
+    
+    # Initialize logging
+    setup_logging(
+        log_level=log_level.upper(),
+        log_to_file=log_to_file,
+        log_dir="logs",
+        enable_structured_logging=True
+    )
+    
+    global logger
+    logger = get_logger(__name__)
+    
+    logger.info("Starting XSLT Test Generator", extra={
+        "xslt_file": xslt_file,
+        "xsd_file": xsd_file,
+        "output_dir": output_dir,
+        "llm_provider": llm_provider,
+        "verbose": verbose,
+        "log_level": log_level
+    })
     
     if verbose:
         console.print("🚀 Starting XSLT Test Generator", style="bold green")
     
     # Validate input files
+    logger.info("Validating input files")
     if not _validate_inputs(xslt_file, xsd_file, output_dir):
+        logger.error("Input validation failed")
         raise typer.Exit(1)
+    logger.info("Input validation successful")
     
     # Initialize agents
+    logger.info("Initializing AI agents")
     if verbose:
         console.print("🤖 Initializing AI agents...", style="blue")
     
     xslt_agent = XSLTAnalyzerAgent()
     xsd_agent = XSDAnalyzerAgent()
     test_generator = TestCaseGeneratorAgent()
+    logger.info("AI agents initialized successfully")
     
     with Progress(
         SpinnerColumn(),
@@ -48,64 +77,143 @@ def generate(
         
         # Step 1: Read files
         task1 = progress.add_task("📖 Reading input files...", total=None)
+        logger.info("Reading input files", extra={"xslt_file": xslt_file, "xsd_file": xsd_file})
         try:
             xslt_content = FileManager.read_file(xslt_file)
             xsd_content = FileManager.read_file(xsd_file)
             progress.update(task1, description="✅ Files read successfully")
+            logger.info("Files read successfully", extra={"xslt_size": len(xslt_content), "xsd_size": len(xsd_content)})
         except Exception as e:
+            logger.error(f"Error reading files: {e}", exc_info=True)
             console.print(f"❌ Error reading files: {e}", style="red")
             raise typer.Exit(1)
         
         # Step 2: Analyze XSLT
         task2 = progress.add_task("🔍 Analyzing XSLT transformation...", total=None)
+        logger.info("Starting XSLT analysis")
         try:
+            import time
+            start_time = time.time()
             xslt_analysis = xslt_agent.analyze_xslt_file(xslt_content)
+            execution_time = time.time() - start_time
+            
             progress.update(task2, description="✅ XSLT analysis completed")
+            logger.info("XSLT analysis completed", extra={"execution_time": execution_time})
+            
+            # Log agent interaction
+            log_agent_interaction(
+                agent_name="XSLTAnalyzerAgent",
+                operation="analyze_xslt_file",
+                input_data={"content_length": len(xslt_content)},
+                output_data=xslt_analysis,
+                execution_time=execution_time,
+                status="success"
+            )
             
             if verbose:
                 _print_xslt_analysis_summary(xslt_analysis)
                 
         except Exception as e:
+            logger.error(f"Error analyzing XSLT: {e}", exc_info=True)
+            log_agent_interaction(
+                agent_name="XSLTAnalyzerAgent",
+                operation="analyze_xslt_file",
+                input_data={"content_length": len(xslt_content)},
+                output_data={"error": str(e)},
+                status="error"
+            )
             console.print(f"❌ Error analyzing XSLT: {e}", style="red")
             raise typer.Exit(1)
         
         # Step 3: Analyze XSD
         task3 = progress.add_task("📋 Analyzing XSD schema...", total=None)
+        logger.info("Starting XSD analysis")
         try:
+            start_time = time.time()
             xsd_analysis = xsd_agent.analyze_xsd_file(xsd_content)
+            execution_time = time.time() - start_time
+            
             progress.update(task3, description="✅ XSD analysis completed")
+            logger.info("XSD analysis completed", extra={"execution_time": execution_time})
+            
+            # Log agent interaction
+            log_agent_interaction(
+                agent_name="XSDAnalyzerAgent",
+                operation="analyze_xsd_file",
+                input_data={"content_length": len(xsd_content)},
+                output_data=xsd_analysis,
+                execution_time=execution_time,
+                status="success"
+            )
             
             if verbose:
                 _print_xsd_analysis_summary(xsd_analysis)
                 
         except Exception as e:
+            logger.error(f"Error analyzing XSD: {e}", exc_info=True)
+            log_agent_interaction(
+                agent_name="XSDAnalyzerAgent",
+                operation="analyze_xsd_file",
+                input_data={"content_length": len(xsd_content)},
+                output_data={"error": str(e)},
+                status="error"
+            )
             console.print(f"❌ Error analyzing XSD: {e}", style="red")
             raise typer.Exit(1)
         
         # Step 4: Generate test cases
         task4 = progress.add_task("🧪 Generating test cases...", total=None)
+        logger.info("Starting test case generation")
         try:
+            start_time = time.time()
             test_results = test_generator.generate_test_cases(xslt_analysis, xsd_analysis)
+            execution_time = time.time() - start_time
+            
             progress.update(task4, description="✅ Test cases generated")
+            logger.info("Test case generation completed", extra={"execution_time": execution_time})
+            
+            # Log agent interaction
+            log_agent_interaction(
+                agent_name="TestCaseGeneratorAgent",
+                operation="generate_test_cases",
+                input_data={"xslt_analysis_keys": list(xslt_analysis.keys()) if isinstance(xslt_analysis, dict) else "non-dict",
+                           "xsd_analysis_keys": list(xsd_analysis.keys()) if isinstance(xsd_analysis, dict) else "non-dict"},
+                output_data=test_results,
+                execution_time=execution_time,
+                status="success"
+            )
             
             if verbose:
                 _print_test_generation_summary(test_results)
                 
         except Exception as e:
+            logger.error(f"Error generating test cases: {e}", exc_info=True)
+            log_agent_interaction(
+                agent_name="TestCaseGeneratorAgent",
+                operation="generate_test_cases",
+                input_data={"xslt_analysis_keys": list(xslt_analysis.keys()) if isinstance(xslt_analysis, dict) else "non-dict",
+                           "xsd_analysis_keys": list(xsd_analysis.keys()) if isinstance(xsd_analysis, dict) else "non-dict"},
+                output_data={"error": str(e)},
+                status="error"
+            )
             console.print(f"❌ Error generating test cases: {e}", style="red")
             raise typer.Exit(1)
         
         # Step 5: Write output files
         task5 = progress.add_task("💾 Writing output files...", total=None)
+        logger.info("Writing output files", extra={"output_dir": output_dir})
         try:
             output_path = _write_output_files(output_dir, test_results, xslt_file, xsd_file)
             progress.update(task5, description="✅ Output files written")
+            logger.info("Output files written successfully", extra={"output_path": output_path})
             
         except Exception as e:
+            logger.error(f"Error writing output: {e}", exc_info=True)
             console.print(f"❌ Error writing output: {e}", style="red")
             raise typer.Exit(1)
     
     # Success message
+    logger.info("Test generation completed successfully", extra={"output_path": output_path})
     console.print(f"\n🎉 Test generation completed successfully!", style="bold green")
     console.print(f"📁 Output location: {output_path}", style="green")
     console.print(f"📊 Generated test cases are ready for use!", style="green")

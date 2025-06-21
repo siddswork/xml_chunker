@@ -2,14 +2,16 @@
 
 from crewai import Agent
 from xslt_test_generator.config.settings import settings
+from xslt_test_generator.config.logging_config import LoggerMixin, get_logger
 from xslt_test_generator.tools.llm_client import llm_client
 from xslt_test_generator.tools.xml_tools import XSLTAnalyzer
 
-class XSLTAnalyzerAgent:
+class XSLTAnalyzerAgent(LoggerMixin):
     """Agent specialized in analyzing XSLT transformations."""
     
     def __init__(self):
         """Initialize XSLT Analyzer Agent."""
+        self.logger.info("Initializing XSLT Analyzer Agent")
         agent_config = settings.agents.get('xslt_analyzer')
         
         self.agent = Agent(
@@ -27,6 +29,7 @@ class XSLTAnalyzerAgent:
             max_retries=agent_config.max_retries,
             allow_delegation=False
         )
+        self.logger.info("XSLT Analyzer Agent initialized successfully")
     
     def analyze_xslt_file(self, xslt_content: str) -> dict:
         """
@@ -39,28 +42,47 @@ class XSLTAnalyzerAgent:
             dict: Comprehensive analysis including patterns, rules, and test scenarios
         """
         
+        self.logger.info("Starting XSLT analysis", extra={"content_length": len(xslt_content)})
+        
         # First, do structural analysis using XML parsing
         try:
+            self.logger.debug("Performing structural analysis")
             xslt_analyzer = XSLTAnalyzer(xslt_content)
             structural_analysis = {
                 'templates': xslt_analyzer.extract_templates(),
                 'conditional_logic': xslt_analyzer.extract_conditional_logic(),
                 'value_mappings': xslt_analyzer.extract_value_mappings()
             }
+            self.logger.info("Structural analysis completed", extra={
+                "templates_count": len(structural_analysis.get('templates', [])),
+                "conditional_logic_count": len(structural_analysis.get('conditional_logic', [])),
+                "value_mappings_count": len(structural_analysis.get('value_mappings', []))
+            })
         except Exception as e:
+            self.logger.error(f"Structural analysis failed: {e}", exc_info=True)
             structural_analysis = {'error': f'Structural analysis failed: {str(e)}'}
         
         # Then, do LLM-based semantic analysis
         try:
+            self.logger.debug("Performing semantic analysis with LLM")
             semantic_analysis = llm_client.analyze_xslt(xslt_content)
+            self.logger.info("Semantic analysis completed")
         except Exception as e:
+            self.logger.error(f"Semantic analysis failed: {e}", exc_info=True)
             semantic_analysis = f'Semantic analysis failed: {str(e)}'
         
-        return {
+        result = {
             'structural_analysis': structural_analysis,
             'semantic_analysis': semantic_analysis,
             'summary': self._generate_analysis_summary(structural_analysis, semantic_analysis)
         }
+        
+        self.logger.info("XSLT analysis completed successfully", extra={
+            "has_structural_error": 'error' in structural_analysis,
+            "semantic_analysis_type": type(semantic_analysis).__name__
+        })
+        
+        return result
     
     def _generate_analysis_summary(self, structural: dict, semantic: str) -> dict:
         """Generate a summary of the XSLT analysis."""

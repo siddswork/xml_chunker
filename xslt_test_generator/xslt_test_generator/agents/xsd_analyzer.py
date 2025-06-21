@@ -2,10 +2,11 @@
 
 from crewai import Agent
 from xslt_test_generator.config.settings import settings
+from xslt_test_generator.config.logging_config import LoggerMixin, get_logger
 from xslt_test_generator.tools.llm_client import llm_client
 from xslt_test_generator.tools.xml_tools import XSDAnalyzer
 
-class XSDAnalyzerAgent:
+class XSDAnalyzerAgent(LoggerMixin):
     """Agent specialized in analyzing XSD schemas."""
     
     def __init__(self):
