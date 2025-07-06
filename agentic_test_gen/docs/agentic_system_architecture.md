@@ -123,7 +123,41 @@ Based on the manual analysis documented in `inspiration_docs/`, the following ke
 **Input**: All agent outputs, schemas, XSLT files, generated test cases
 **Output**: Validation reports, error identification, coverage analysis
 
-#### 7. Orchestrator Agent
+#### 7. Memory Management Agent
+**Purpose**: Manage memory usage, context compression, and resource optimization
+**Role**: Ensure efficient memory usage and prevent resource exhaustion
+
+**Tools & Functions**:
+- `monitor_memory_usage()` - Real-time memory monitoring with alerts
+- `compress_context(context_data)` - Intelligent context compression
+- `manage_context_cache(cache_operations)` - Cache management and cleanup
+- `detect_memory_leaks()` - Memory leak detection and prevention
+- `trigger_cleanup_strategies(memory_pressure)` - Emergency cleanup when needed
+- `optimize_chunk_sizes(performance_metrics)` - Adaptive chunk sizing
+- `manage_disk_spillover(context_data)` - Spill old context to disk
+- `validate_memory_integrity()` - Ensure context data integrity
+
+**Input**: Memory usage metrics, context data, performance requirements
+**Output**: Memory optimization reports, context compression metrics, cleanup actions
+
+#### 8. Error Recovery Agent
+**Purpose**: Handle errors, implement fallback strategies, and ensure system resilience
+**Role**: Maintain system stability and recover from various failure scenarios
+
+**Tools & Functions**:
+- `detect_error_conditions(system_state)` - Identify error conditions and types
+- `implement_fallback_strategies(error_type)` - Execute appropriate recovery strategies
+- `retry_failed_operations(operation_context)` - Retry operations with backoff
+- `validate_recovery_success(recovery_metrics)` - Verify recovery effectiveness
+- `log_error_patterns(error_history)` - Track and analyze error patterns
+- `optimize_error_handling(performance_data)` - Improve error handling efficiency
+- `graceful_degradation(system_limits)` - Reduce functionality when needed
+- `system_health_monitoring(health_metrics)` - Monitor overall system health
+
+**Input**: Error conditions, system state, recovery requirements
+**Output**: Error recovery reports, fallback strategy execution, system health metrics
+
+#### 9. Orchestrator Agent
 **Purpose**: Coordinate workflow and manage agent interactions
 **Role**: Master coordinator that manages the entire analysis and generation process
 
@@ -136,8 +170,10 @@ Based on the manual analysis documented in `inspiration_docs/`, the following ke
 - `track_analysis_progress(workflow_state)` - Monitor completion and quality metrics
 - `handle_workflow_errors(error_state)` - Manage failures and recovery strategies
 - `optimize_agent_execution(performance_metrics)` - Improve workflow efficiency
+- `manage_resource_allocation(resource_requirements)` - Allocate system resources efficiently
+- `coordinate_memory_management(memory_agents)` - Coordinate with memory management
 
-**Input**: Analysis objectives, file sets, agent capabilities
+**Input**: Analysis objectives, file sets, agent capabilities, system resources
 **Output**: Complete analysis reports, test case collections, workflow documentation
 
 ## Agent Coordination Workflow
@@ -157,7 +193,7 @@ Based on the manual analysis documented in `inspiration_docs/`, the following ke
 2. **Cross-Reference Validator** → Validate generated test cases
 3. **Orchestrator** → Aggregate and organize final deliverables
 
-## Context Management Strategy
+## Enhanced Context Management Strategy
 
 ### Shared Context Objects
 - **File Dependency Graph**: Relationships between XSLT, input XSD, output XSD
@@ -165,12 +201,26 @@ Based on the manual analysis documented in `inspiration_docs/`, the following ke
 - **Schema Element Maps**: Cross-references between input/output elements
 - **Pattern Library**: Identified transformation patterns and their characteristics
 - **Test Case Registry**: Generated test cases with metadata and categorization
+- **Memory Usage Metrics**: Real-time memory usage and optimization data
+- **Error Context History**: Historical error patterns and recovery strategies
+- **Performance Benchmarks**: System performance metrics and optimization targets
 
-### Context Sharing Mechanisms
+### Advanced Context Sharing Mechanisms
 - **Agent-to-Agent Communication**: Structured data exchange between agents
-- **Centralized Context Store**: Shared memory for analysis results
-- **Workflow State Management**: Track progress and dependencies
-- **Error Context Propagation**: Share error information for debugging
+- **Centralized Context Store**: Shared memory for analysis results with compression
+- **Workflow State Management**: Track progress and dependencies with persistence
+- **Error Context Propagation**: Share error information for debugging and recovery
+- **Memory-Aware Context Loading**: Load context based on memory availability
+- **Context Compression Pipeline**: Automatic context compression with priority weighting
+- **Disk Spillover Management**: Spill old context to disk when memory is limited
+- **Context Integrity Validation**: Ensure context data integrity across operations
+
+### Context Optimization Strategies
+- **Hierarchical Context Storage**: Multi-level context with different priorities
+- **Context Summarization**: Compress context to essential elements
+- **Selective Context Loading**: Load only relevant context for current operations
+- **Context Caching**: Cache frequently accessed context with LRU eviction
+- **Context Lifecycle Management**: Automatic cleanup of old context data
 
 ## Quality Assurance Framework
 
@@ -316,11 +366,16 @@ class TestXSLTTransformation:
 - Context management through conversation history
 - Error handling and retry mechanisms
 
-### File Processing Strategy
-- Progressive file reading (inspired by manual analysis)
-- Line-range based analysis for large files
-- Grep-style search for targeted analysis
-- Cross-file reference tracking
+### Enhanced File Processing Strategy
+- **Progressive file reading** (inspired by manual analysis)
+- **Streaming file processing** for memory efficiency
+- **Line-range based analysis** for large files with memory mapping
+- **Grep-style search** for targeted analysis
+- **Cross-file reference tracking** with persistent storage
+- **Adaptive chunking** based on memory usage and file complexity
+- **Memory-mapped file access** for very large files (>100MB)
+- **Buffered reading** with configurable buffer sizes
+- **Progress tracking** for long-running operations
 
 ### Output Generation
 - **Executable Python/pytest test files** (primary output)
@@ -336,21 +391,40 @@ class TestXSLTTransformation:
 - **File Management**: Temporary directories for analysis artifacts
 - **Results Storage**: Structured output for UI consumption
 
-## Scalability Considerations
+## Enhanced Scalability Considerations
 
 ### Multi-File Analysis
-- Batch processing of multiple XSLT files
-- Parallel agent execution where possible
-- Shared pattern library across analyses
-- Cumulative learning from multiple analyses
+- **Batch processing** of multiple XSLT files with resource management
+- **Parallel agent execution** where possible with memory coordination
+- **Shared pattern library** across analyses with persistent storage
+- **Cumulative learning** from multiple analyses with pattern recognition
+- **Distributed processing** for very large file sets
+- **Resource pooling** for efficient memory and CPU usage
+
+### Memory Scalability
+- **Adaptive memory allocation** based on file size and complexity
+- **Memory pool management** for efficient resource utilization
+- **Garbage collection optimization** with generational strategies
+- **Memory-mapped file processing** for files exceeding memory limits
+- **Streaming analysis** for unlimited file sizes
+- **Context spillover** to disk for large analysis contexts
+
+### Performance Scalability
+- **Performance monitoring** with real-time metrics
+- **Adaptive algorithms** that adjust based on system performance
+- **Caching strategies** for frequently accessed data
+- **Parallel processing** where analysis can be parallelized
+- **Resource optimization** based on available system resources
 
 ### Extensibility
-- Plugin architecture for new agent types
-- Configurable analysis depth and focus
-- Custom pattern recognition rules
-- Integration with external validation tools
+- **Plugin architecture** for new agent types with memory management
+- **Configurable analysis depth** and focus with resource awareness
+- **Custom pattern recognition** rules with performance optimization
+- **Integration with external validation** tools with resource coordination
+- **Modular memory management** for different analysis types
+- **Configurable fallback strategies** for different failure scenarios
 
-## Success Criteria
+## Enhanced Success Criteria
 
 The agentic system should achieve:
 1. **Match or exceed manual analysis quality**: Generate comprehensive test cases from similar XSLT files
@@ -358,5 +432,33 @@ The agentic system should achieve:
 3. **Valid test case generation**: All generated XML samples should be schema-compliant
 4. **Systematic analysis approach**: Replicate the progressive depth methodology
 5. **Efficient execution**: Complete analysis in significantly less time than manual approach
+6. **Memory efficiency**: Process files of any size within memory constraints (< 1GB)
+7. **Robust error handling**: Gracefully handle all error conditions with recovery
+8. **Performance targets**: < 10 seconds per 1000 lines of XSLT processing
+9. **Context preservation**: Maintain > 95% accuracy in context across chunks
+10. **System resilience**: Handle failures and recover without data loss
 
-This architecture provides a robust foundation for automated XSLT test case generation while maintaining the quality and comprehensiveness demonstrated by the manual analysis approach.
+## Memory Management Success Metrics
+
+### Memory Usage Targets
+- **Total memory usage**: < 1GB regardless of file size
+- **Memory growth per chunk**: < 10MB per chunk processed
+- **Context compression ratio**: > 70% compression achieved
+- **Cache hit rate**: > 80% for repeated analysis
+- **Garbage collection overhead**: < 5% of total processing time
+
+### Performance Targets
+- **Processing speed**: < 10 seconds per 1000 lines of XSLT
+- **Memory allocation time**: < 100ms for context loading
+- **Context compression time**: < 500ms per chunk
+- **Error recovery time**: < 2 seconds for standard errors
+- **Fallback strategy execution**: < 5 seconds for emergency cleanup
+
+### Quality Assurance Metrics
+- **Analysis accuracy**: > 95% compared to manual analysis
+- **Test case validity**: > 98% generated tests pass execution
+- **Schema compliance**: 100% generated XML validates against schemas
+- **Business rule coverage**: > 90% of transformation rules identified
+- **Context integrity**: 100% context data integrity maintained
+
+This enhanced architecture provides a robust, scalable, and memory-efficient foundation for automated XSLT test case generation while maintaining the quality and comprehensiveness demonstrated by the manual analysis approach, with comprehensive memory management and error recovery capabilities.
