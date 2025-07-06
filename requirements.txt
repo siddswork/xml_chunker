@@ -5,6 +5,9 @@ xmlschema>=2.3.0
 streamlit-tree-select>=0.0.5
 jsonschema>=4.0.0
 
+# System monitoring dependencies
+psutil>=5.9.0
+
 # Testing dependencies
 pytest>=7.0.0
 pytest-cov>=4.0.0
