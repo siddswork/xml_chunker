@@ -88,19 +88,37 @@ class ChunkInfo:
         return len(self.lines)
 
 
+# Default helper patterns for different XSLT generators
+DEFAULT_HELPER_PATTERNS = {
+    'mapforce': r'(?:vmf:)?vmf\d+',           # MapForce generated helpers (vmf:vmf1_inputtoresult)
+    'saxon': r'(?:f:)?func\d+',               # Saxon helper functions (f:func1, func2)
+    'custom': r'(?:util:)?helper[\w_]*',      # Custom helper patterns (util:helper_name)
+    'generic': r'(?:\w+:)?(?:helper|util|fn)\w*'  # Generic helper detection
+}
+
+
 class XSLTChunker:
     """Intelligent XSLT file chunker"""
     
-    def __init__(self, max_tokens_per_chunk: int = 15000, overlap_tokens: int = 500):
+    def __init__(self, max_tokens_per_chunk: int = 15000, overlap_tokens: int = 500, 
+                 helper_patterns: Optional[List[str]] = None):
         """
         Initialize XSLT chunker
         
         Args:
             max_tokens_per_chunk: Maximum tokens per chunk
             overlap_tokens: Number of tokens to overlap between chunks
+            helper_patterns: List of regex patterns to identify helper templates.
+                           If None, defaults to MapForce patterns for backward compatibility.
         """
         self.max_tokens_per_chunk = max_tokens_per_chunk
         self.overlap_tokens = overlap_tokens
+        
+        # Set helper patterns - default to MapForce for backward compatibility
+        if helper_patterns is None:
+            self.helper_patterns = [DEFAULT_HELPER_PATTERNS['mapforce']]
+        else:
+            self.helper_patterns = helper_patterns
         
         self.file_reader = StreamingFileReader()
         self.token_counter = TokenCounter()
@@ -145,14 +163,12 @@ class XSLTChunker:
             # Example: </xsl:function>
             'function_end': r'</xsl:function>',
             
-            # Helper template pattern (vmf: namespace helper functions)
-            # Examples: vmf:vmf1_inputtoresult
-            #          vmf:vmf2_inputtoresult  
-            #          vmf:vmf3_inputtoresult
-            #          vmf:vmf4_inputtoresult
-            #          vmf1_helper (without namespace)
-            #          vmf2_transform (without namespace)
-            'helper_template': r'(?:vmf:)?vmf\d+',
+            # Helper template patterns - now configurable via self.helper_patterns
+            # Examples depend on the patterns provided:
+            # MapForce: vmf:vmf1_inputtoresult, vmf:vmf2_inputtoresult, vmf1_helper
+            # Saxon: f:func1, func2_helper
+            # Custom: util:helper_name, helper_function
+            # Note: Helper detection is now handled by _is_helper_template() method
             
             # Namespace declarations
             # Examples: xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
@@ -479,9 +495,16 @@ class XSLTChunker:
         
         return None
     
+    def _is_helper_template(self, name: str) -> bool:
+        """Check if a template name matches any helper pattern"""
+        for pattern in self.helper_patterns:
+            if re.search(pattern, name):
+                return True
+        return False
+    
     def _classify_template_type(self, name: Optional[str], line: str) -> ChunkType:
         """Classify template type based on name and content"""
-        if name and re.search(self.xslt_patterns['helper_template'], name):
+        if name and self._is_helper_template(name):
             return ChunkType.HELPER_TEMPLATE
         elif name and name.startswith('match:'):
             return ChunkType.MAIN_TEMPLATE

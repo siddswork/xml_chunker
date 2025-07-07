@@ -11,16 +11,15 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.core.xslt_chunker import XSLTChunker, ChunkType
+from src.core.xslt_chunker import XSLTChunker, ChunkType, DEFAULT_HELPER_PATTERNS
 
 
 class TestHelperDetection:
     """Test helper template detection logic"""
     
     def test_helper_template_pattern(self):
-        """Test helper template regex pattern"""
+        """Test helper template regex pattern with default MapForce patterns"""
         chunker = XSLTChunker()
-        pattern = chunker.xslt_patterns['helper_template']
         
         # Test cases from the debug file
         test_cases = [
@@ -36,7 +35,7 @@ class TestHelperDetection:
         ]
         
         for name, should_match, description in test_cases:
-            match = re.search(pattern, name)
+            match = chunker._is_helper_template(name)
             assert bool(match) == should_match, f"Pattern failed for {description}: {name}"
     
     def test_template_classification(self):
@@ -169,16 +168,99 @@ class TestHelperDetection:
             assert template_type == ChunkType.HELPER_TEMPLATE, f"Failed to classify helper: {template_line}"
     
     def test_regex_pattern_compilation(self):
-        """Test that the helper template regex pattern compiles correctly"""
+        """Test that the helper template regex patterns compile correctly"""
         chunker = XSLTChunker()
-        pattern = chunker.xslt_patterns['helper_template']
         
-        # Test that pattern compiles
-        compiled_pattern = re.compile(pattern)
-        assert compiled_pattern is not None
+        # Test that all patterns compile correctly
+        for pattern in chunker.helper_patterns:
+            compiled_pattern = re.compile(pattern)
+            assert compiled_pattern is not None
         
-        # Test pattern against known good cases
-        assert compiled_pattern.search("vmf:vmf1_inputtoresult") is not None
-        assert compiled_pattern.search("vmf1_helper") is not None
-        assert compiled_pattern.search("regular_template") is None
-        assert compiled_pattern.search("match:/") is None
+        # Test default MapForce pattern against known good cases
+        assert chunker._is_helper_template("vmf:vmf1_inputtoresult")
+        assert chunker._is_helper_template("vmf1_helper")
+        assert not chunker._is_helper_template("regular_template")
+        assert not chunker._is_helper_template("match:/")
+    
+    def test_configurable_helper_patterns(self):
+        """Test configurable helper patterns functionality"""
+        # Test 1: Default MapForce patterns
+        chunker_default = XSLTChunker()
+        assert chunker_default.helper_patterns == [DEFAULT_HELPER_PATTERNS['mapforce']]
+        assert chunker_default._is_helper_template("vmf:vmf1_inputtoresult")
+        assert chunker_default._is_helper_template("vmf2_helper")
+        assert not chunker_default._is_helper_template("f:func1")
+        
+        # Test 2: Saxon patterns
+        chunker_saxon = XSLTChunker(helper_patterns=[DEFAULT_HELPER_PATTERNS['saxon']])
+        assert chunker_saxon._is_helper_template("f:func1")
+        assert chunker_saxon._is_helper_template("func2")
+        assert not chunker_saxon._is_helper_template("vmf:vmf1_inputtoresult")
+        
+        # Test 3: Custom patterns
+        chunker_custom = XSLTChunker(helper_patterns=[DEFAULT_HELPER_PATTERNS['custom']])
+        assert chunker_custom._is_helper_template("util:helper_name")
+        assert chunker_custom._is_helper_template("helper_function")
+        assert not chunker_custom._is_helper_template("vmf:vmf1_inputtoresult")
+        
+        # Test 4: Multiple patterns
+        chunker_multi = XSLTChunker(helper_patterns=[
+            DEFAULT_HELPER_PATTERNS['mapforce'],
+            DEFAULT_HELPER_PATTERNS['saxon']
+        ])
+        assert chunker_multi._is_helper_template("vmf:vmf1_inputtoresult")
+        assert chunker_multi._is_helper_template("f:func1")
+        assert not chunker_multi._is_helper_template("util:helper_name")
+        
+        # Test 5: Custom regex patterns
+        custom_regex = [r'my_helper_\d+', r'(?:ns:)?special_func']
+        chunker_custom_regex = XSLTChunker(helper_patterns=custom_regex)
+        assert chunker_custom_regex._is_helper_template("my_helper_1")
+        assert chunker_custom_regex._is_helper_template("ns:special_func")
+        assert chunker_custom_regex._is_helper_template("special_func")
+        assert not chunker_custom_regex._is_helper_template("vmf:vmf1_inputtoresult")
+    
+    def test_template_classification_with_custom_patterns(self):
+        """Test template classification with custom patterns"""
+        # Test with Saxon patterns
+        chunker_saxon = XSLTChunker(helper_patterns=[DEFAULT_HELPER_PATTERNS['saxon']])
+        
+        test_cases = [
+            ("f:func1", ChunkType.HELPER_TEMPLATE),
+            ("func2", ChunkType.HELPER_TEMPLATE),
+            ("match:/", ChunkType.MAIN_TEMPLATE),
+            ("regular_template", ChunkType.MAIN_TEMPLATE),
+            ("vmf:vmf1_inputtoresult", ChunkType.MAIN_TEMPLATE),  # Should NOT be helper with Saxon patterns
+        ]
+        
+        for name, expected_type in test_cases:
+            result = chunker_saxon._classify_template_type(name, f'<xsl:template name="{name}">')
+            assert result == expected_type, f"Classification failed for {name}: expected {expected_type}, got {result}"
+    
+    def test_default_patterns_constant(self):
+        """Test that default patterns are correctly defined"""
+        assert 'mapforce' in DEFAULT_HELPER_PATTERNS
+        assert 'saxon' in DEFAULT_HELPER_PATTERNS
+        assert 'custom' in DEFAULT_HELPER_PATTERNS
+        assert 'generic' in DEFAULT_HELPER_PATTERNS
+        
+        # Test that all patterns are valid regex
+        for pattern_name, pattern in DEFAULT_HELPER_PATTERNS.items():
+            try:
+                re.compile(pattern)
+            except re.error:
+                pytest.fail(f"Invalid regex pattern for {pattern_name}: {pattern}")
+    
+    def test_backward_compatibility(self):
+        """Test that existing code continues to work without changes"""
+        # Old way (should still work)
+        chunker_old = XSLTChunker()
+        
+        # Test that it still detects MapForce helpers by default
+        assert chunker_old._is_helper_template("vmf:vmf1_inputtoresult")
+        assert chunker_old._is_helper_template("vmf2_helper")
+        assert not chunker_old._is_helper_template("regular_template")
+        
+        # Test template classification works the same
+        assert chunker_old._classify_template_type("vmf:vmf1_inputtoresult", "") == ChunkType.HELPER_TEMPLATE
+        assert chunker_old._classify_template_type("regular_template", "") == ChunkType.MAIN_TEMPLATE

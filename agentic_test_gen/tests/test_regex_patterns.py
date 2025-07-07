@@ -39,7 +39,6 @@ class TestRegexPatterns:
     def test_helper_template_pattern(self):
         """Test helper template pattern recognition"""
         chunker = XSLTChunker()
-        pattern = chunker.xslt_patterns['helper_template']
         
         test_cases = [
             ('vmf:vmf1_inputtoresult', True, "Helper with namespace"),
@@ -54,7 +53,7 @@ class TestRegexPatterns:
         ]
         
         for name, should_match, description in test_cases:
-            match = re.search(pattern, name)
+            match = chunker._is_helper_template(name)
             assert bool(match) == should_match, f"Helper template pattern failed for {description}: {name}"
     
     def test_variable_declaration_pattern(self):

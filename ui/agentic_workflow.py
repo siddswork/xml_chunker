@@ -21,12 +21,63 @@ try:
     agentic_path = Path(__file__).parent.parent / "agentic_test_gen"
     if agentic_path.exists():
         sys.path.insert(0, str(agentic_path))
-        from src.core.xslt_chunker import XSLTChunker, ChunkType
+        from src.core.xslt_chunker import XSLTChunker, ChunkType, DEFAULT_HELPER_PATTERNS
         from src.utils.streaming_file_reader import StreamingFileReader
         from src.utils.token_counter import TokenCounter
         agentic_system_available = True
 except ImportError:
     agentic_system_available = False
+
+
+def analyze_potential_helper_patterns(content: str) -> Dict[str, Any]:
+    """
+    Analyze XSLT content to detect potential helper patterns that might not be detected
+    by current patterns, and suggest alternative configurations.
+    """
+    import re
+    
+    potential_helpers = []
+    suggestions = []
+    
+    # Look for template names that might be helpers but not detected by current patterns
+    template_pattern = r'<xsl:template\s+name="([^"]+)"'
+    all_templates = re.findall(template_pattern, content)
+    
+    # Check for different naming patterns
+    patterns_to_check = {
+        'MapForce (vmf)': r'(?:vmf:)?vmf\d+',
+        'Saxon (f:func)': r'(?:f:)?func\d+',
+        'Custom (util/helper)': r'(?:util:)?helper[\w_]*',
+        'Generic utility': r'(?:\w+:)?(?:helper|util|fn)\w*',
+        'Transform functions': r'(?:\w+:)?(?:transform|convert|map|format)\w*',
+        'Processing functions': r'(?:\w+:)?(?:process|handle|build)\w*'
+    }
+    
+    detected_patterns = {}
+    
+    for template_name in all_templates:
+        for pattern_name, pattern in patterns_to_check.items():
+            if re.search(pattern, template_name, re.IGNORECASE):
+                if pattern_name not in detected_patterns:
+                    detected_patterns[pattern_name] = []
+                detected_patterns[pattern_name].append(template_name)
+    
+    # Look for functions that look like helpers but don't match any pattern
+    possible_helpers = []
+    for template_name in all_templates:
+        # Simple heuristics for potential helpers
+        if (len(template_name) > 8 and  # Reasonably long name
+            ('_' in template_name or ':' in template_name) and  # Has namespace or underscore
+            not any(re.search(pattern, template_name, re.IGNORECASE) 
+                   for pattern in patterns_to_check.values())):
+            possible_helpers.append(template_name)
+    
+    return {
+        'total_templates': len(all_templates),
+        'detected_patterns': detected_patterns,
+        'unmatched_potential_helpers': possible_helpers[:10],  # Limit to first 10
+        'all_template_names': all_templates
+    }
 
 
 def render_agentic_xslt_workflow():
@@ -299,15 +350,79 @@ def render_agentic_chunking_tab():
                 percentage = (count / len(chunks)) * 100
                 st.metric(chunk_type.replace('_', ' ').title(), f"{count} ({percentage:.1f}%)")
         
-        # Helper templates section
+        # Helper templates section with smart feedback
+        st.markdown("#### 🔧 Helper Templates Analysis")
+        
         if helper_templates:
-            st.markdown("#### 🔧 Helper Templates Detected")
+            st.success(f"✅ **{len(helper_templates)} helper templates detected** using current MapForce patterns")
             
             for i, helper in enumerate(helper_templates[:5], 1):
                 st.markdown(f"**{i}. {helper['name']}** - {helper['tokens']} tokens, {helper['dependencies']} dependencies")
             
             if len(helper_templates) > 5:
                 st.info(f"... and {len(helper_templates) - 5} more helper templates")
+        else:
+            # No helpers detected - provide intelligent feedback
+            st.warning("⚠️ **No helper templates detected** with current patterns")
+            
+            # Analyze the XSLT content for potential patterns
+            if st.session_state.get('agentic_xslt_files'):
+                file_content = st.session_state['agentic_xslt_files'][0]['content']  # Use first file for analysis
+                pattern_analysis = analyze_potential_helper_patterns(file_content)
+                
+                if pattern_analysis['detected_patterns'] or pattern_analysis['unmatched_potential_helpers']:
+                    st.markdown("##### 🔍 Pattern Analysis & Suggestions")
+                    
+                    # Show detected patterns from other systems
+                    if pattern_analysis['detected_patterns']:
+                        st.info("**Alternative patterns detected in your XSLT:**")
+                        for pattern_name, templates in pattern_analysis['detected_patterns'].items():
+                            if pattern_name != 'MapForce (vmf)':  # Skip the current default
+                                st.markdown(f"- **{pattern_name}**: {', '.join(templates[:3])}")
+                                if len(templates) > 3:
+                                    st.markdown(f"  ... and {len(templates) - 3} more")
+                    
+                    # Show unmatched potential helpers
+                    if pattern_analysis['unmatched_potential_helpers']:
+                        st.info("**Unmatched templates that might be helpers:**")
+                        unmatched = pattern_analysis['unmatched_potential_helpers']
+                        st.markdown(f"- {', '.join(unmatched[:5])}")
+                        if len(unmatched) > 5:
+                            st.markdown(f"  ... and {len(unmatched) - 5} more")
+                    
+                    # Provide actionable suggestions
+                    with st.expander("💡 **Click for helper pattern configuration suggestions**"):
+                        st.markdown("**To improve helper template detection:**")
+                        
+                        if any('Saxon' in p for p in pattern_analysis['detected_patterns']):
+                            st.markdown("1. ✨ Try **Saxon patterns** - your XSLT contains `f:func` style templates")
+                            st.code("chunker = XSLTChunker(helper_patterns=[DEFAULT_HELPER_PATTERNS['saxon']])")
+                        
+                        if any('util' in t.lower() or 'helper' in t.lower() for t in pattern_analysis['unmatched_potential_helpers']):
+                            st.markdown("2. ✨ Try **Custom/Utility patterns** - detected utility-style templates")
+                            st.code("chunker = XSLTChunker(helper_patterns=[DEFAULT_HELPER_PATTERNS['custom']])")
+                        
+                        if pattern_analysis['unmatched_potential_helpers']:
+                            st.markdown("3. ✨ Try **Generic patterns** - broader detection")
+                            st.code("chunker = XSLTChunker(helper_patterns=[DEFAULT_HELPER_PATTERNS['generic']])")
+                        
+                        st.markdown("4. ✨ **Combine multiple patterns** for comprehensive detection")
+                        st.code("""chunker = XSLTChunker(helper_patterns=[
+    DEFAULT_HELPER_PATTERNS['mapforce'],
+    DEFAULT_HELPER_PATTERNS['saxon'],
+    DEFAULT_HELPER_PATTERNS['custom']
+])""")
+                        
+                        st.markdown("5. 🛠️ **Create custom patterns** for your specific naming conventions")
+                        if pattern_analysis['unmatched_potential_helpers']:
+                            example_template = pattern_analysis['unmatched_potential_helpers'][0]
+                            st.code(f"# Example custom pattern for templates like '{example_template}'\ncustom_pattern = r'{example_template.split('_')[0]}_\\\\w+'")
+                else:
+                    st.info("💡 Your XSLT appears to use main templates without separate helper templates, or uses a unique naming pattern not covered by current detection.")
+            
+            st.markdown("---")
+            st.markdown("**Current Detection**: Using MapForce patterns (`vmf:vmf1_*`, `vmf2_*`, etc.)")
+            st.markdown("**Need different patterns?** See suggestions above or contact support for custom pattern configuration.")
         
         # Chunk preview
         st.markdown("#### 📄 Chunk Preview")
