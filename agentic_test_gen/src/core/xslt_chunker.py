@@ -101,7 +101,8 @@ class XSLTChunker:
     """Intelligent XSLT file chunker"""
     
     def __init__(self, max_tokens_per_chunk: int = 15000, overlap_tokens: int = 500, 
-                 helper_patterns: Optional[List[str]] = None):
+                 helper_patterns: Optional[List[str]] = None, 
+                 main_template_split_threshold: int = 10000):
         """
         Initialize XSLT chunker
         
@@ -113,6 +114,7 @@ class XSLTChunker:
         """
         self.max_tokens_per_chunk = max_tokens_per_chunk
         self.overlap_tokens = overlap_tokens
+        self.main_template_split_threshold = main_template_split_threshold
         
         # Set helper patterns - default to MapForce for backward compatibility
         if helper_patterns is None:
@@ -379,10 +381,14 @@ class XSLTChunker:
         final_chunks = []
         
         for chunk in chunks:
-            if chunk.estimated_tokens <= self.max_tokens_per_chunk:
+            if chunk.chunk_type == ChunkType.MAIN_TEMPLATE and chunk.estimated_tokens > self.main_template_split_threshold:
+                # NEW: Use semantic sub-chunking for large main templates
+                sub_chunks = self._split_large_main_template(chunk)
+                final_chunks.extend(sub_chunks)
+            elif chunk.estimated_tokens <= self.max_tokens_per_chunk:
                 final_chunks.append(chunk)
             else:
-                # Split oversized chunk
+                # Existing logic for other oversized chunks
                 sub_chunks = self._split_large_chunk(chunk)
                 final_chunks.extend(sub_chunks)
         
@@ -572,6 +578,316 @@ class XSLTChunker:
             base_score = base_score * (len(text) / 1000)  # Per 1000 characters
         
         return min(base_score, 10.0)  # Cap at 10.0
+
+    def _identify_main_template_logical_sections(self, lines: List[str], start_line: int) -> List[Dict]:
+        """
+        Identify logical sections within large main templates - GENERIC approach
+        
+        This method identifies semantic boundaries that work across different XSLT files:
+        1. Major output element boundaries (most generic)
+        2. Top-level for-each loops (universal XSLT pattern)  
+        3. Variable declaration clusters (common pattern)
+        4. Choose block boundaries (universal conditional logic)
+        5. Comment-based sections (if present)
+        
+        Args:
+            lines: All lines from the template
+            start_line: Starting line number of the template
+            
+        Returns:
+            List of logical section boundaries
+        """
+        sections = []
+        
+        # Find major output elements - these are the most reliable boundaries
+        major_elements = self._find_major_output_elements(lines)
+        sections.extend(major_elements)
+        
+        # Find top-level for-each loops - universal XSLT pattern
+        for_each_loops = self._find_top_level_for_each_loops(lines, start_line)
+        sections.extend(for_each_loops)
+        
+        # Find variable declaration clusters
+        variable_clusters = self._find_variable_declaration_clusters(lines)
+        sections.extend(variable_clusters)
+        
+        # Find major choose blocks
+        choose_blocks = self._find_major_choose_blocks(lines)
+        sections.extend(choose_blocks)
+        
+        # Sort by line number and remove duplicates
+        sections = sorted(sections, key=lambda x: x['line'])
+        
+        # Remove duplicates (keep the first occurrence)
+        unique_sections = []
+        seen_lines = set()
+        for section in sections:
+            if section['line'] not in seen_lines:
+                unique_sections.append(section)
+                seen_lines.add(section['line'])
+        
+        return unique_sections
+
+    def _find_major_output_elements(self, lines: List[str]) -> List[Dict]:
+        """
+        Find major output XML elements - universal pattern
+        Look for elements like <Party>, <Query>, <Individual>, <IdentityDocument>
+        Pattern: <(?!xsl:|/)([A-Z][a-zA-Z]{3,})
+        """
+        elements = []
+        
+        for line_num, line in enumerate(lines, 1):
+            # Look for major output elements (capitalized, not XSLT, not closing)
+            # Examples: <Party>, <Query>, <Individual>, <IdentityDocument>
+            match = re.search(r'<(?!xsl:|/)([A-Z][a-zA-Z]{3,})', line.strip())
+            if match:
+                element_name = match.group(1)
+                # Skip common attributes and short elements
+                if element_name not in ['XML', 'HTTP', 'URI', 'URL', 'ID']:
+                    elements.append({
+                        'type': 'major_output_element',
+                        'line': line_num,
+                        'element_name': element_name,
+                        'content': line.strip()
+                    })
+        
+        return elements
+
+    def _find_top_level_for_each_loops(self, lines: List[str], template_start: int) -> List[Dict]:
+        """
+        Find top-level for-each loops - universal XSLT pattern
+        Only consider loops at base indentation level (not deeply nested)
+        Track: select attribute, indentation level, line position
+        """
+        loops = []
+        base_indent = None
+        
+        for line_num, line in enumerate(lines, 1):
+            # Find for-each loops
+            if re.search(r'<xsl:for-each\s+select=', line):
+                # Determine indentation level
+                indent = len(line) - len(line.lstrip())
+                
+                # Set base indentation from first for-each we find
+                if base_indent is None:
+                    base_indent = indent
+                
+                # Only consider loops at base indentation level (top-level)
+                if indent <= base_indent + 4:  # Allow slight variation
+                    select_match = re.search(r'select="([^"]+)"', line)
+                    select_path = select_match.group(1) if select_match else 'unknown'
+                    
+                    loops.append({
+                        'type': 'top_level_for_each',
+                        'line': line_num,
+                        'select_path': select_path,
+                        'indent_level': indent,
+                        'content': line.strip()
+                    })
+        
+        return loops
+
+    def _find_variable_declaration_clusters(self, lines: List[str]) -> List[Dict]:
+        """
+        Find clusters of variable declarations
+        Group related variables that should stay together
+        """
+        clusters = []
+        current_cluster = []
+        
+        for line_num, line in enumerate(lines, 1):
+            if re.search(self.xslt_patterns['variable_declaration'], line):
+                current_cluster.append({
+                    'line': line_num,
+                    'content': line.strip()
+                })
+            else:
+                # If we have a cluster and hit a non-variable line, close the cluster
+                if current_cluster and len(current_cluster) >= 2:
+                    clusters.append({
+                        'type': 'variable_cluster',
+                        'line': current_cluster[0]['line'],
+                        'cluster_size': len(current_cluster),
+                        'content': f"Variable cluster ({len(current_cluster)} variables)"
+                    })
+                current_cluster = []
+        
+        # Handle final cluster
+        if current_cluster and len(current_cluster) >= 2:
+            clusters.append({
+                'type': 'variable_cluster',
+                'line': current_cluster[0]['line'],
+                'cluster_size': len(current_cluster),
+                'content': f"Variable cluster ({len(current_cluster)} variables)"
+            })
+        
+        return clusters
+
+    def _find_major_choose_blocks(self, lines: List[str]) -> List[Dict]:
+        """
+        Find major choose blocks that can serve as boundaries
+        Must handle nested choose blocks correctly
+        """
+        blocks = []
+        choose_stack = []
+        
+        for line_num, line in enumerate(lines, 1):
+            if re.search(self.xslt_patterns['choose_start'], line):
+                choose_stack.append({
+                    'start_line': line_num,
+                    'indent': len(line) - len(line.lstrip())
+                })
+            elif re.search(self.xslt_patterns['choose_end'], line):
+                if choose_stack:
+                    choose_info = choose_stack.pop()
+                    # Only consider top-level choose blocks (not deeply nested)
+                    if len(choose_stack) == 0:  # Top-level choose block
+                        blocks.append({
+                            'type': 'major_choose_block',
+                            'line': choose_info['start_line'],
+                            'end_line': line_num,
+                            'content': f"Choose block ({choose_info['start_line']}-{line_num})"
+                        })
+        
+        return blocks
+
+    def _split_large_main_template(self, chunk: ChunkInfo) -> List[ChunkInfo]:
+        """
+        Entry point for main template decomposition
+        Calls _identify_main_template_logical_sections and _create_semantic_sub_chunks
+        Only triggers for MAIN_TEMPLATE chunks > 20,000 tokens
+        """
+        logger.info(f"Splitting large main template: {chunk.chunk_id} ({chunk.estimated_tokens} tokens)")
+        
+        # Identify logical sections within the main template
+        sections = self._identify_main_template_logical_sections(chunk.lines, chunk.start_line)
+        
+        # Create semantic sub-chunks based on the identified sections
+        sub_chunks = self._create_semantic_sub_chunks(chunk, sections)
+        
+        logger.info(f"Split main template into {len(sub_chunks)} sub-chunks")
+        return sub_chunks
+
+    def _create_semantic_sub_chunks(self, chunk: ChunkInfo, sections: List[Dict]) -> List[ChunkInfo]:
+        """
+        Split oversized main template into logical sub-chunks
+        Target size: 3,000-5,000 tokens per sub-chunk
+        Minimum size: 1,000 tokens (avoid tiny fragments)
+        Overlap: 200-500 tokens with variable declarations and context
+        """
+        sub_chunks = []
+        lines = chunk.lines
+        
+        # If no sections found, fall back to simple splitting
+        if not sections:
+            logger.warning(f"No logical sections found in {chunk.chunk_id}, using simple split")
+            return self._split_large_chunk(chunk)
+        
+        # Create boundaries for sub-chunks
+        boundaries = [0]  # Start with first line
+        current_tokens = 0
+        min_chunk_tokens = 1000
+        target_chunk_tokens = 4000
+        max_chunk_tokens = 6000
+        
+        for section in sections:
+            # Calculate tokens up to this section
+            section_line_idx = section['line'] - 1  # Convert to 0-based index
+            if section_line_idx < len(lines):
+                tokens_to_section = sum(
+                    self.token_counter.estimate_tokens(lines[i]) 
+                    for i in range(boundaries[-1], min(section_line_idx, len(lines)))
+                )
+                
+                # If adding this section would create a good-sized chunk
+                if (current_tokens + tokens_to_section >= target_chunk_tokens or 
+                    current_tokens + tokens_to_section >= max_chunk_tokens):
+                    
+                    # Only create boundary if we have minimum tokens
+                    if current_tokens >= min_chunk_tokens:
+                        boundaries.append(section_line_idx)
+                        current_tokens = 0
+                    else:
+                        current_tokens += tokens_to_section
+                else:
+                    current_tokens += tokens_to_section
+        
+        # Ensure we end with the last line
+        if boundaries[-1] < len(lines):
+            boundaries.append(len(lines))
+        
+        # Create sub-chunks with overlap
+        for i in range(len(boundaries) - 1):
+            start_idx = boundaries[i]
+            end_idx = boundaries[i + 1]
+            
+            # Add overlap from previous chunk (except for first chunk)
+            if i > 0:
+                overlap_start = max(0, start_idx - self._calculate_overlap_lines(lines, start_idx))
+                chunk_lines = lines[overlap_start:end_idx]
+                actual_start_line = chunk.start_line + overlap_start
+            else:
+                chunk_lines = lines[start_idx:end_idx]
+                actual_start_line = chunk.start_line + start_idx
+            
+            # Create sub-chunk
+            sub_chunk = ChunkInfo(
+                chunk_id=f"{chunk.chunk_id}_sub_{i:02d}",
+                chunk_type=ChunkType.MAIN_TEMPLATE,
+                name=f"{chunk.name}_section_{i+1}" if chunk.name else f"main_template_section_{i+1}",
+                start_line=actual_start_line,
+                end_line=chunk.start_line + end_idx - 1,
+                lines=chunk_lines,
+                estimated_tokens=sum(self.token_counter.estimate_tokens(line) for line in chunk_lines),
+                dependencies=chunk.dependencies.copy(),
+                metadata=chunk.metadata.copy()
+            )
+            
+            # Add section-specific metadata
+            sub_chunk.metadata.update({
+                'is_sub_chunk': True,
+                'parent_chunk_id': chunk.chunk_id,
+                'sub_chunk_index': i,
+                'logical_sections': [s for s in sections if start_idx <= s['line'] - 1 < end_idx]
+            })
+            
+            sub_chunks.append(sub_chunk)
+        
+        return sub_chunks
+
+    def _calculate_overlap_lines(self, lines: List[str], start_idx: int) -> int:
+        """
+        Calculate number of lines to include as overlap
+        Focus on minimal context - just essential variable declarations and structure
+        """
+        overlap_lines = 0
+        overlap_tokens = 0
+        target_overlap_tokens = min(self.overlap_tokens // 4, 100)  # Much smaller overlap - max 100 tokens
+        max_overlap_lines = 10  # Hard limit to prevent excessive overlap
+        
+        # Look backwards from start_idx to find essential context only
+        for i in range(start_idx - 1, max(0, start_idx - max_overlap_lines - 1), -1):
+            if i < len(lines):
+                line = lines[i]
+                line_tokens = self.token_counter.estimate_tokens(line)
+                
+                # Only include essential context: variable declarations and immediate structure
+                is_essential = (
+                    re.search(self.xslt_patterns['variable_declaration'], line) or
+                    re.search(r'<xsl:for-each', line) or
+                    line.strip().startswith('</') or  # Closing tags for context
+                    line.strip() == '' or  # Empty lines for readability
+                    (overlap_lines < 3 and overlap_tokens + line_tokens <= target_overlap_tokens)  # First few lines
+                )
+                
+                if is_essential and overlap_tokens + line_tokens <= target_overlap_tokens:
+                    overlap_lines += 1
+                    overlap_tokens += line_tokens
+                else:
+                    # Stop if we have enough context or hit non-essential content
+                    break
+        
+        return min(overlap_lines, max_overlap_lines)  # Enforce hard limit
 
 
 # Utility functions

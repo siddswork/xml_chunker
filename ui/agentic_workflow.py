@@ -427,7 +427,7 @@ def render_agentic_chunking_tab():
         # Chunk preview
         st.markdown("#### 📄 Chunk Preview")
         
-        chunk_options = [f"Chunk {i+1}: {chunk.chunk_id} ({chunk.chunk_type.value})" for i, chunk in enumerate(chunks)]
+        chunk_options = [f"Chunk {i+1}: {chunk.chunk_id} ({chunk.chunk_type.value}) - Lines {chunk.start_line}-{chunk.end_line} ({chunk.estimated_tokens} tokens)" for i, chunk in enumerate(chunks)]
         selected_chunk_idx = st.selectbox(
             "Select chunk to preview:",
             range(len(chunk_options)),
