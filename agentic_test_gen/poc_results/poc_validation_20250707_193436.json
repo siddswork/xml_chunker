@@ -1,0 +1,296 @@
+{
+  "overall_pass_rate": 0.0,
+  "meets_poc_criteria": false,
+  "total_cases_tested": 15,
+  "passing_cases": 0,
+  "failing_cases": 15,
+  "average_scores": {
+    "overall": 0.4082833486703383,
+    "business_understanding": 0.3602052393351416,
+    "scenario_coverage": 0.38595747784955364,
+    "test_meaningfulness": 0.4847962962962962,
+    "integration_awareness": 0.4126666666666667
+  },
+  "detailed_results": [
+    {
+      "case_id": "vmf1_passport_transformation",
+      "category": "helper_template",
+      "overall_score": 0.42918635282570317,
+      "business_understanding": 0.3733367793305158,
+      "scenario_coverage": 0.38207460943952726,
+      "test_meaningfulness": 0.4666666666666666,
+      "integration_awareness": 0.525,
+      "meets_threshold": false,
+      "processing_time": 31.45470952987671,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about IATA NDC requires standardized document type codes for airline interoperability and regulatory compl... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Passenger with passport document needs NDC-compliant processing for international travel booking'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['main_passenger_section', 'document_validation', 'target_processing']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "vmf2_visa_transformation",
+      "category": "helper_template",
+      "overall_score": 0.341836412018427,
+      "business_understanding": 0.397392415307843,
+      "scenario_coverage": 0.3946414163709631,
+      "test_meaningfulness": 0.4958333333333333,
+      "integration_awareness": 0.0,
+      "meets_threshold": false,
+      "processing_time": 45.07875633239746,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Different visa types require specific NDC encoding for border control systems and airline compliance... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'International passenger with various visa documentation types requiring proper NDC encoding'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['visa_processing_section', 'border_control_validation', 'target_specific_rules']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "helper_template_integration",
+      "category": "integration",
+      "overall_score": 0.4992648666627213,
+      "business_understanding": 0.41986163567302387,
+      "scenario_coverage": 0.4098921705099234,
+      "test_meaningfulness": 0.5833333333333333,
+      "integration_awareness": 0.625,
+      "meets_threshold": false,
+      "processing_time": 44.88017272949219,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Document type transformations from helpers must flow correctly into downstream validation and proces... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Complete passenger booking workflow where document types from helpers affect validation rules'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['vmf1_template', 'main_passenger_section', 'document_output_generation']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "vmf3_identity_transformation",
+      "category": "helper_template",
+      "overall_score": 0.4531741255453199,
+      "business_understanding": 0.37317027639279676,
+      "scenario_coverage": 0.43989217050992335,
+      "test_meaningfulness": 0.525,
+      "integration_awareness": 0.5,
+      "meets_threshold": false,
+      "processing_time": 29.511637926101685,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about National ID documents require specific NDC standardization for domestic travel validation... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Domestic passenger using national ID for identity verification in booking system'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['identity_validation', 'domestic_travel_rules']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "vmf4_unknown_document_handling",
+      "category": "helper_template",
+      "overall_score": 0.37391426771787656,
+      "business_understanding": 0.44031434828319693,
+      "scenario_coverage": 0.22394651959833656,
+      "test_meaningfulness": 0.31666666666666665,
+      "integration_awareness": 0.5333333333333333,
+      "meets_threshold": false,
+      "processing_time": 24.768789768218994,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Graceful handling of non-standard or legacy document types to prevent system failures... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Legacy system integration where unusual document types might be encountered'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['error_handling', 'fallback_processing']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "ua_target_specific_processing",
+      "category": "main_template",
+      "overall_score": 0.5048859819859802,
+      "business_understanding": 0.42708605630666197,
+      "scenario_coverage": 0.47570732704259333,
+      "test_meaningfulness": 0.5833333333333333,
+      "integration_awareness": 0.56,
+      "meets_threshold": false,
+      "processing_time": 49.43456673622131,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about United Airlines has specific compliance requirements and business rules that differ from standard pr... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'United Airlines booking requiring enhanced contact validation and document processing'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['target_detection', 'validation_rules', 'contact_processing', 'helper_templates']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "multi_passenger_contact_validation",
+      "category": "main_template",
+      "overall_score": 0.4720658942402315,
+      "business_understanding": 0.29696391768808306,
+      "scenario_coverage": 0.5272402090685596,
+      "test_meaningfulness": 0.5566666666666666,
+      "integration_awareness": 0.56,
+      "meets_threshold": false,
+      "processing_time": 38.36375117301941,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Family or group bookings need contact verification for compliance and communication purposes... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Family of 4 booking UA flight requiring contact validation for all passengers'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['passenger_counting', 'contact_validation', 'target_processing', 'loop_processing']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "phone_number_standardization",
+      "category": "main_template",
+      "overall_score": 0.4057866386704516,
+      "business_understanding": 0.32743389572943093,
+      "scenario_coverage": 0.44689254647315624,
+      "test_meaningfulness": 0.3833333333333333,
+      "integration_awareness": 0.5,
+      "meets_threshold": false,
+      "processing_time": 26.501675605773926,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Different airlines and regions have different phone number format requirements for compliance... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'International phone number needs proper formatting for specific airline target system'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['contact_processing', 'target_validation', 'string_normalization']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "address_concatenation_logic",
+      "category": "main_template",
+      "overall_score": 0.4038713324128631,
+      "business_understanding": 0.36574513722895446,
+      "scenario_coverage": 0.37825783164337395,
+      "test_meaningfulness": 0.3583333333333333,
+      "integration_awareness": 0.55,
+      "meets_threshold": false,
+      "processing_time": 33.00529861450195,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Address standardization is required for booking systems, compliance, and customer communication... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Multi-line international address needs proper formatting for booking confirmation'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['address_processing', 'string_manipulation', 'validation_rules']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "contact_type_processing",
+      "category": "main_template",
+      "overall_score": 0.28564065643797576,
+      "business_understanding": 0.2577894514909422,
+      "scenario_coverage": 0.3840486172961058,
+      "test_meaningfulness": 0.42916666666666664,
+      "integration_awareness": 0.024999999999999998,
+      "meets_threshold": false,
+      "processing_time": 41.61377263069153,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Contact information has different validation requirements and business rules based on type... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Passenger with multiple contact methods requiring type-specific processing and validation'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['contact_validation', 'type_processing', 'validation_rules']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "end_to_end_passenger_flow",
+      "category": "integration",
+      "overall_score": 0.4367779883262727,
+      "business_understanding": 0.27653723142467856,
+      "scenario_coverage": 0.3861006089288097,
+      "test_meaningfulness": 0.4958333333333333,
+      "integration_awareness": 0.6666666666666667,
+      "meets_threshold": false,
+      "processing_time": 41.86605906486511,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Full passenger booking workflow must integrate all helper templates, validation rules, and target-sp... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Complete booking process for UA flight with family passengers requiring full workflow validation'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['all_helper_templates', 'main_processing', 'validation_engine', 'output_generation', 'target_processing']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "error_handling_and_fallbacks",
+      "category": "integration",
+      "overall_score": 0.479323659822095,
+      "business_understanding": 0.4207721910156095,
+      "scenario_coverage": 0.2797013434029823,
+      "test_meaningfulness": 0.7166666666666666,
+      "integration_awareness": 0.52,
+      "meets_threshold": false,
+      "processing_time": 33.61446523666382,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Robust system behavior when input data is incomplete or invalid, preventing system failures... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Passenger record with missing required fields requiring fallback processing'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['error_handling', 'fallback_processing', 'validation_engine', 'default_values']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "conditional_logic_chains",
+      "category": "integration",
+      "overall_score": 0.34285742923349505,
+      "business_understanding": 0.3620551399755667,
+      "scenario_coverage": 0.44029688229663355,
+      "test_meaningfulness": 0.41666666666666663,
+      "integration_awareness": 0.1,
+      "meets_threshold": false,
+      "processing_time": 34.46886134147644,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Business logic must handle complex combinations of conditions for different booking scenarios... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Complex booking scenario with multiple conditional paths requiring nested decision logic'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['condition_evaluation', 'target_processing', 'passenger_analysis', 'contact_validation']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "performance_optimization_patterns",
+      "category": "integration",
+      "overall_score": 0.33534077691421493,
+      "business_understanding": 0.34224432707870306,
+      "scenario_coverage": 0.43400324849574945,
+      "test_meaningfulness": 0.41666666666666663,
+      "integration_awareness": 0.09999999999999999,
+      "meets_threshold": false,
+      "processing_time": 32.677390336990356,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about System performance must be maintained under load with many passengers and complex processing... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'Large group booking with 50+ passengers requiring efficient processing patterns'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['loop_optimization', 'variable_management', 'performance_patterns']. AI should understand how different parts integrate together."
+      }
+    },
+    {
+      "case_id": "compliance_validation_integration",
+      "category": "integration",
+      "overall_score": 0.3603238472414461,
+      "business_understanding": 0.3223757871011167,
+      "scenario_coverage": 0.18666666666666665,
+      "test_meaningfulness": 0.5277777777777777,
+      "integration_awareness": 0.42500000000000004,
+      "meets_threshold": false,
+      "processing_time": 31.95331621170044,
+      "feedback": {
+        "business_understanding": "AI needs better business context understanding. Expected business context about Regulatory compliance requirements must be validated across the entire transformation workflow... AI should focus more on WHY the rule exists and business value.",
+        "scenario_coverage": "AI scenario identification needs improvement. Manual analysis identified scenarios like 'International booking requiring compliance validation across all business rule categories'. AI should identify more specific, business-relevant scenarios.",
+        "test_meaningfulness": "AI-generated tests need to be more business-meaningful. Tests should focus on catching real business bugs, not just syntax errors. Include edge cases and business validation scenarios.",
+        "integration_awareness": "AI needs better understanding of cross-chunk dependencies. Manual analysis identified dependencies: ['all_business_rules', 'compliance_engine', 'validation_framework', 'regulatory_checks']. AI should understand how different parts integrate together."
+      }
+    }
+  ],
+  "processing_time": 539.2000410556793,
+  "recommendation": {
+    "decision": "RETHINK_APPROACH",
+    "confidence": "LOW",
+    "rationale": "PoC achieved only 0.0% pass rate. Current approach unlikely to achieve manual analysis quality.",
+    "alternative_strategies": [
+      "Hybrid human-AI workflow approach",
+      "Enhanced domain knowledge integration",
+      "Alternative LLM models or approaches",
+      "Manual analysis with AI assistance"
+    ],
+    "next_steps": [
+      "Evaluate alternative approaches",
+      "Consider hybrid human-AI workflow",
+      "Investigate different LLM strategies",
+      "Reassess project approach and timeline"
+    ]
+  },
+  "improvement_areas": [
+    "Business Understanding: Common issue across multiple cases",
+    "Scenario Coverage: Common issue across multiple cases",
+    "Test Meaningfulness: Common issue across multiple cases",
+    "Integration Awareness: Common issue across multiple cases"
+  ],
+  "success_stories": []
+}
