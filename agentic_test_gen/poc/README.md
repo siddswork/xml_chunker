@@ -2,6 +2,12 @@
 
 This directory contains the complete Proof of Concept validation system that tests whether our AI-based approach can match the quality of manual analysis before proceeding with full implementation.
 
+## 🎯 Understanding Multi-Pass Analysis
+
+**New to the concept?** Read [HOW_IT_WORKS.md](./HOW_IT_WORKS.md) for a beginner-friendly explanation of how multi-pass analysis solves the "analyzing chunks in isolation" problem that caused the original PoC to fail.
+
+**Technical implementation details?** See [MULTI_PASS_TECHNICAL_GUIDE.md](./MULTI_PASS_TECHNICAL_GUIDE.md) for architecture details, code examples, and performance considerations.
+
 ## Overview
 
 The PoC validates our approach against a baseline of 15 representative test cases extracted from comprehensive manual analysis that generated 132+ meaningful test cases. The validation uses a 4-dimensional quality scoring framework to ensure our AI agents can achieve 90%+ quality match with manual analysis.
