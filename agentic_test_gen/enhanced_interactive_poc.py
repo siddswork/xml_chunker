@@ -1,0 +1,606 @@
+#!/usr/bin/env python3
+"""
+Enhanced Interactive XSLT PoC - Detailed Mapping Specification with Context Management
+
+This enhanced version focuses on:
+1. Extracting detailed mapping specifications (source→destination→transformation)
+2. Progressive summarization with context reset
+3. File-based understanding storage
+4. Target: 20% chunk coverage for rapid validation
+"""
+
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass, asdict
+import time
+import re
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+# Load environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / '.env')
+except ImportError:
+    print("⚠️  python-dotenv not found")
+
+import openai
+from create_interactive_poc import SmartXSLTChunker, SimpleChunk
+
+
+@dataclass
+class MappingSpecification:
+    """Detailed mapping specification for XSLT transformation"""
+    id: str
+    source_path: str
+    destination_path: str
+    transformation_type: str  # direct_mapping, conditional_mapping, function_call, etc.
+    transformation_logic: str
+    conditions: List[str]
+    validation_rules: List[str]
+    template_name: str
+    chunk_source: str
+
+
+@dataclass
+class TemplateAnalysis:
+    """Deep analysis of an XSLT template"""
+    name: str
+    purpose: str
+    input_parameters: List[str]
+    output_structure: str
+    dependencies: List[str]
+    complexity: str
+    mappings: List[MappingSpecification]
+
+
+class EnhancedXSLTExplorer:
+    """Enhanced XSLT explorer with detailed mapping extraction and context management"""
+    
+    def __init__(self, openai_api_key: str, xslt_file_path: str, target_coverage: float = 0.2):
+        self.openai_client = openai.OpenAI(api_key=openai_api_key)
+        self.xslt_file_path = xslt_file_path
+        self.target_coverage = target_coverage
+        
+        # Initialize chunker and create chunks
+        print("🔍 Chunking XSLT file...")
+        chunker = SmartXSLTChunker()
+        self.chunks = chunker.chunk_xslt_file(xslt_file_path)
+        self.target_chunks = int(len(self.chunks) * target_coverage)
+        
+        print(f"✅ Created {len(self.chunks)} chunks, targeting {self.target_chunks} chunks ({target_coverage:.0%})")
+        
+        # Create indexes
+        self.chunk_index = {chunk.id: chunk for chunk in self.chunks}
+        
+        # Exploration state
+        self.chunks_explored = set()
+        self.current_chunk_index = 0
+        self.conversation_turns = 0
+        self.context_resets = 0
+        
+        # Understanding storage (file-based)
+        self.results_dir = Path("poc_results/enhanced_exploration")
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.mapping_specs: List[MappingSpecification] = []
+        self.template_analyses: List[TemplateAnalysis] = []
+        
+        # Cost tracking
+        self.cost_tracker = {
+            "total_calls": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "cumulative_cost_usd": 0.0,
+            "cost_per_phase": []
+        }
+        
+        # Available functions
+        self.available_functions = {
+            "get_current_chunk": self.get_current_chunk,
+            "get_next_chunk": self.get_next_chunk,
+            "analyze_chunk_mappings": self.analyze_chunk_mappings,
+            "save_template_analysis": self.save_template_analysis,
+            "get_understanding_summary": self.get_understanding_summary,
+            "search_related_chunks": self.search_related_chunks
+        }
+    
+    def get_current_chunk(self) -> Dict[str, Any]:
+        """Get the current chunk being analyzed"""
+        if self.current_chunk_index < len(self.chunks):
+            chunk = self.chunks[self.current_chunk_index]
+            self.chunks_explored.add(chunk.id)
+            
+            return {
+                "success": True,
+                "chunk": asdict(chunk),
+                "progress": f"{len(self.chunks_explored)}/{self.target_chunks}",
+                "message": f"Current chunk: {chunk.id}"
+            }
+        
+        return {"success": False, "message": "No more chunks to explore"}
+    
+    def get_next_chunk(self) -> Dict[str, Any]:
+        """Move to the next chunk"""
+        self.current_chunk_index += 1
+        
+        if self.current_chunk_index < len(self.chunks) and len(self.chunks_explored) < self.target_chunks:
+            return self.get_current_chunk()
+        else:
+            return {
+                "success": False,
+                "message": f"Target coverage reached: {len(self.chunks_explored)}/{self.target_chunks} chunks explored"
+            }
+    
+    def analyze_chunk_mappings(self, mapping_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """Save detailed mapping analysis for current chunk"""
+        
+        if not mapping_analysis or not isinstance(mapping_analysis, dict):
+            return {"success": False, "message": "Invalid mapping analysis provided"}
+        
+        # Extract mappings from analysis
+        if "mappings" in mapping_analysis:
+            for mapping_data in mapping_analysis["mappings"]:
+                try:
+                    mapping_spec = MappingSpecification(
+                        id=f"mapping_{len(self.mapping_specs):03d}",
+                        source_path=mapping_data.get("source_path", ""),
+                        destination_path=mapping_data.get("destination_path", ""),
+                        transformation_type=mapping_data.get("transformation_type", "unknown"),
+                        transformation_logic=mapping_data.get("transformation_logic", ""),
+                        conditions=mapping_data.get("conditions", []),
+                        validation_rules=mapping_data.get("validation_rules", []),
+                        template_name=mapping_data.get("template_name", ""),
+                        chunk_source=self.chunks[self.current_chunk_index].id if self.current_chunk_index < len(self.chunks) else ""
+                    )
+                    self.mapping_specs.append(mapping_spec)
+                except Exception as e:
+                    print(f"⚠️  Error creating mapping spec: {e}")
+        
+        # Save to file
+        self._save_current_understanding()
+        
+        return {
+            "success": True,
+            "message": f"Saved {len(mapping_analysis.get('mappings', []))} mapping specifications",
+            "total_mappings": len(self.mapping_specs)
+        }
+    
+    def save_template_analysis(self, template_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """Save detailed template analysis"""
+        
+        if not template_analysis or not isinstance(template_analysis, dict):
+            return {"success": False, "message": "Invalid template analysis provided"}
+        
+        try:
+            # Create template analysis
+            analysis = TemplateAnalysis(
+                name=template_analysis.get("name", ""),
+                purpose=template_analysis.get("purpose", ""),
+                input_parameters=template_analysis.get("input_parameters", []),
+                output_structure=template_analysis.get("output_structure", ""),
+                dependencies=template_analysis.get("dependencies", []),
+                complexity=template_analysis.get("complexity", "unknown"),
+                mappings=[]  # Mappings are handled separately
+            )
+            
+            self.template_analyses.append(analysis)
+            self._save_current_understanding()
+            
+            return {
+                "success": True,
+                "message": f"Saved template analysis for '{analysis.name}'",
+                "total_templates": len(self.template_analyses)
+            }
+        
+        except Exception as e:
+            return {"success": False, "message": f"Error saving template analysis: {e}"}
+    
+    def get_understanding_summary(self) -> Dict[str, Any]:
+        """Get current understanding summary"""
+        
+        return {
+            "success": True,
+            "summary": {
+                "chunks_explored": len(self.chunks_explored),
+                "target_chunks": self.target_chunks,
+                "progress_percentage": (len(self.chunks_explored) / self.target_chunks) * 100,
+                "mapping_specifications": len(self.mapping_specs),
+                "template_analyses": len(self.template_analyses),
+                "context_resets": self.context_resets,
+                "conversation_turns": self.conversation_turns
+            }
+        }
+    
+    def search_related_chunks(self, search_pattern: str) -> Dict[str, Any]:
+        """Search for chunks containing specific patterns"""
+        
+        matches = []
+        for chunk in self.chunks:
+            if re.search(search_pattern, chunk.content, re.IGNORECASE):
+                matches.append({
+                    "id": chunk.id,
+                    "description": chunk.description,
+                    "templates_defined": chunk.templates_defined
+                })
+        
+        return {
+            "success": True,
+            "matches": matches[:5],  # Limit to 5 results
+            "total_matches": len(matches),
+            "message": f"Found {len(matches)} chunks matching '{search_pattern}'"
+        }
+    
+    def _save_current_understanding(self):
+        """Save current understanding to files"""
+        
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        
+        # Save mapping specifications
+        mappings_file = self.results_dir / f"mapping_specifications_{timestamp}.json"
+        with open(mappings_file, 'w') as f:
+            json.dump([asdict(spec) for spec in self.mapping_specs], f, indent=2)
+        
+        # Save template analyses
+        templates_file = self.results_dir / f"template_analyses_{timestamp}.json"
+        with open(templates_file, 'w') as f:
+            json.dump([asdict(analysis) for analysis in self.template_analyses], f, indent=2)
+        
+        # Save exploration summary
+        summary_file = self.results_dir / f"exploration_summary_{timestamp}.json"
+        summary = {
+            "timestamp": timestamp,
+            "chunks_explored": list(self.chunks_explored),
+            "progress": {
+                "chunks_explored": len(self.chunks_explored),
+                "target_chunks": self.target_chunks,
+                "progress_percentage": (len(self.chunks_explored) / self.target_chunks) * 100
+            },
+            "statistics": {
+                "mapping_specifications": len(self.mapping_specs),
+                "template_analyses": len(self.template_analyses),
+                "context_resets": self.context_resets,
+                "conversation_turns": self.conversation_turns
+            },
+            "cost_tracking": self.cost_tracker
+        }
+        
+        with open(summary_file, 'w') as f:
+            json.dump(summary, f, indent=2)
+        
+        print(f"\n💾 UNDERSTANDING SAVED:")
+        print(f"   📁 Directory: {self.results_dir}")
+        print(f"   📄 Mappings: {len(self.mapping_specs)} specifications")
+        print(f"   📋 Templates: {len(self.template_analyses)} analyses")
+        print(f"{'~'*60}")
+    
+    def _should_reset_context(self) -> bool:
+        """Determine if context should be reset"""
+        return self.conversation_turns >= 15  # Reset every 15 turns
+    
+    def _reset_context(self) -> str:
+        """Reset conversation context and return summary"""
+        
+        self.context_resets += 1
+        self.conversation_turns = 0
+        
+        # Create progressive summary
+        summary = f"""
+PROGRESSIVE UNDERSTANDING SUMMARY (Reset #{self.context_resets}):
+
+EXPLORATION PROGRESS:
+- Chunks explored: {len(self.chunks_explored)}/{self.target_chunks} ({(len(self.chunks_explored)/self.target_chunks)*100:.1f}%)
+- Mapping specifications extracted: {len(self.mapping_specs)}
+- Template analyses completed: {len(self.template_analyses)}
+
+RECENT MAPPINGS (last 5):
+{json.dumps([asdict(spec) for spec in self.mapping_specs[-5:]], indent=2) if self.mapping_specs else "None yet"}
+
+NEXT GOAL: Continue systematic chunk exploration and mapping extraction.
+"""
+        
+        print(f"\n🔄 CONTEXT RESET #{self.context_resets}")
+        print(f"📊 Progress: {len(self.chunks_explored)}/{self.target_chunks} chunks explored")
+        print(f"💾 Understanding preserved in files")
+        print(f"🔄 Starting fresh conversation context")
+        print(f"{'█'*60}\n")
+        return summary
+    
+    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """Calculate cost for GPT-4o-mini"""
+        input_cost = (input_tokens / 1000) * 0.000150
+        output_cost = (output_tokens / 1000) * 0.000600
+        return input_cost + output_cost
+    
+    def _update_cost_tracking(self, input_tokens: int, output_tokens: int):
+        """Update cost tracking"""
+        
+        call_cost = self._calculate_cost(input_tokens, output_tokens)
+        
+        self.cost_tracker["total_calls"] += 1
+        self.cost_tracker["total_input_tokens"] += input_tokens
+        self.cost_tracker["total_output_tokens"] += output_tokens
+        self.cost_tracker["cumulative_cost_usd"] += call_cost
+        
+        print(f"\n💰 COST TRACKING:")
+        print(f"   Call #{self.cost_tracker['total_calls']}: ${call_cost:.6f} | Total: ${self.cost_tracker['cumulative_cost_usd']:.6f}")
+        print(f"   Tokens: {input_tokens:,} in, {output_tokens:,} out | Context turns: {self.conversation_turns}")
+        print(f"{'-'*60}")
+    
+    async def start_enhanced_exploration(self) -> str:
+        """Start enhanced exploration with detailed mapping extraction"""
+        
+        print(f"🚀 Starting Enhanced XSLT Exploration")
+        print(f"📊 Target: {self.target_chunks} chunks ({self.target_coverage:.0%} coverage)")
+        
+        initial_prompt = f"""You are an expert XSLT analyst extracting detailed mapping specifications.
+
+GOAL: Extract detailed source→destination→transformation mappings from XSLT chunks.
+
+TARGET: Explore {self.target_chunks} chunks systematically and extract comprehensive mapping specifications.
+
+AVAILABLE FUNCTIONS:
+- get_current_chunk(): Get current chunk for analysis
+- get_next_chunk(): Move to next chunk
+- analyze_chunk_mappings(mapping_analysis): Save detailed mapping specifications
+- save_template_analysis(template_analysis): Save template analysis
+- get_understanding_summary(): Check progress
+- search_related_chunks(pattern): Find related chunks
+
+REQUIRED OUTPUT FORMAT for analyze_chunk_mappings():
+{{
+  "mappings": [
+    {{
+      "source_path": "xpath/to/source/element",
+      "destination_path": "xpath/to/destination/element", 
+      "transformation_type": "direct_mapping|conditional_mapping|function_call|text_manipulation",
+      "transformation_logic": "actual XSLT code or description",
+      "conditions": ["condition1", "condition2"],
+      "validation_rules": ["rule1", "rule2"],
+      "template_name": "template name"
+    }}
+  ]
+}}
+
+EXPLORATION STRATEGY:
+1. get_current_chunk() to see current chunk
+2. Extract ALL source→destination mappings from the chunk
+3. Document transformation logic and conditions
+4. Call analyze_chunk_mappings() with detailed analysis
+5. get_next_chunk() and repeat
+6. Continue until target coverage reached
+
+Start by getting the current chunk and analyzing its mappings in detail."""
+        
+        # Start exploration
+        result = await self._call_llm_with_functions(initial_prompt)
+        
+        # Save final results
+        self._save_current_understanding()
+        
+        return result
+    
+    async def _call_llm_with_functions(self, prompt: str, conversation_history: List[Dict] = None) -> str:
+        """Enhanced LLM calling with context management"""
+        
+        # Initialize or manage conversation history
+        if conversation_history is None:
+            conversation_history = [{"role": "user", "content": prompt}]
+        elif self._should_reset_context():
+            # Reset context with progressive summary
+            summary = self._reset_context()
+            conversation_history = [{"role": "user", "content": summary + "\n\n" + prompt}]
+        
+        # Check completion
+        if len(self.chunks_explored) >= self.target_chunks:
+            return f"✅ Target coverage reached: {len(self.chunks_explored)}/{self.target_chunks} chunks explored"
+        
+        # Safety limit
+        if self.conversation_turns > 50:
+            return f"⚠️ Safety limit reached: {self.conversation_turns} turns"
+        
+        # Define function schemas
+        functions = [
+            {
+                "name": "get_current_chunk",
+                "description": "Get the current chunk for analysis",
+                "parameters": {"type": "object", "properties": {}}
+            },
+            {
+                "name": "get_next_chunk", 
+                "description": "Move to the next chunk",
+                "parameters": {"type": "object", "properties": {}}
+            },
+            {
+                "name": "analyze_chunk_mappings",
+                "description": "Save detailed mapping specifications for current chunk",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "mapping_analysis": {
+                            "type": "object",
+                            "description": "Detailed mapping analysis with source→destination→transformation"
+                        }
+                    },
+                    "required": ["mapping_analysis"]
+                }
+            },
+            {
+                "name": "save_template_analysis",
+                "description": "Save detailed template analysis",
+                "parameters": {
+                    "type": "object", 
+                    "properties": {
+                        "template_analysis": {
+                            "type": "object",
+                            "description": "Detailed template analysis"
+                        }
+                    },
+                    "required": ["template_analysis"]
+                }
+            },
+            {
+                "name": "get_understanding_summary",
+                "description": "Get current exploration progress",
+                "parameters": {"type": "object", "properties": {}}
+            },
+            {
+                "name": "search_related_chunks",
+                "description": "Search for chunks containing specific patterns",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "search_pattern": {"type": "string"}
+                    },
+                    "required": ["search_pattern"]
+                }
+            }
+        ]
+        
+        try:
+            tools = [{"type": "function", "function": func} for func in functions]
+            
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=conversation_history,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0.1,
+                max_tokens=2000
+            )
+            
+            message = response.choices[0].message
+            self.conversation_turns += 1
+            
+            # Track costs
+            usage = response.usage
+            self._update_cost_tracking(usage.prompt_tokens, usage.completion_tokens)
+            
+            if message.tool_calls:
+                # Add assistant message to conversation
+                conversation_history.append({
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": tool_call.id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_call.function.name,
+                                "arguments": tool_call.function.arguments
+                            }
+                        } for tool_call in message.tool_calls
+                    ]
+                })
+                
+                # Execute function calls
+                for tool_call in message.tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                    
+                    print(f"\n{'='*60}")
+                    print(f"🔧 FUNCTION CALL: {function_name}({list(function_args.keys())})")
+                    print(f"{'='*60}")
+                    
+                    try:
+                        if function_name in self.available_functions:
+                            function_result = self.available_functions[function_name](**function_args)
+                        else:
+                            function_result = {"success": False, "message": f"Unknown function: {function_name}"}
+                    except Exception as e:
+                        function_result = {"success": False, "message": f"Function error: {str(e)}"}
+                    
+                    # Add function result to conversation
+                    conversation_history.append({
+                        "role": "tool",
+                        "content": json.dumps(function_result, indent=2),
+                        "tool_call_id": tool_call.id
+                    })
+                    
+                    print(f"✅ RESULT: {function_result.get('success', 'unknown')}")
+                    if 'message' in function_result:
+                        print(f"📝 MESSAGE: {function_result['message']}")
+                    print(f"{'='*60}\n")
+                
+                # Continue exploration
+                continue_prompt = f"Continue systematic exploration. Progress: {len(self.chunks_explored)}/{self.target_chunks} chunks."
+                return await self._call_llm_with_functions(continue_prompt, conversation_history)
+            
+            return message.content or "Exploration completed"
+            
+        except Exception as e:
+            print(f"❌ Error during exploration: {str(e)}")
+            return f"Error during exploration: {str(e)}"
+
+
+async def main():
+    """Main enhanced PoC execution"""
+    
+    print("🚀 Enhanced Interactive XSLT Exploration PoC")
+    print("=" * 60)
+    
+    # Check API key
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        print("❌ ERROR: OpenAI API key not found!")
+        return False
+    
+    # Set up paths
+    xslt_path = "/home/sidd/dev/xml_wizard/resource/orderCreate/xslt/OrderCreate_MapForce_Full.xslt"
+    
+    if not Path(xslt_path).exists():
+        print(f"❌ ERROR: XSLT file not found: {xslt_path}")
+        return False
+    
+    try:
+        # Initialize enhanced explorer (20% coverage)
+        explorer = EnhancedXSLTExplorer(api_key, xslt_path, target_coverage=0.2)
+        
+        # Start exploration
+        result = await explorer.start_enhanced_exploration()
+        
+        print(f"\n🎯 ENHANCED EXPLORATION RESULT:")
+        print(f"=" * 60)
+        print(result)
+        
+        # Final assessment
+        final_summary = explorer.get_understanding_summary()["summary"]
+        
+        print(f"\n📊 FINAL ASSESSMENT:")
+        print(f"   • Chunks Explored: {final_summary['chunks_explored']}/{final_summary['target_chunks']} ({final_summary['progress_percentage']:.1f}%)")
+        print(f"   • Mapping Specifications: {final_summary['mapping_specifications']}")
+        print(f"   • Template Analyses: {final_summary['template_analyses']}")
+        print(f"   • Context Resets: {final_summary['context_resets']}")
+        print(f"   • Total Cost: ${explorer.cost_tracker['cumulative_cost_usd']:.6f}")
+        
+        # Validate success
+        success = (
+            final_summary['progress_percentage'] >= 80 and  # Reached most of target
+            final_summary['mapping_specifications'] > 0 and  # Extracted mappings
+            explorer.cost_tracker['cumulative_cost_usd'] < 1.0  # Reasonable cost
+        )
+        
+        if success:
+            print(f"\n🎉 ENHANCED PoC SUCCESS!")
+            print(f"✨ Detailed mapping specifications extracted with context management")
+            print(f"📁 Results saved to: {explorer.results_dir}")
+        else:
+            print(f"\n⚠️ ENHANCED PoC NEEDS IMPROVEMENT")
+            print(f"🔧 Check mapping extraction quality and coverage")
+        
+        return success
+        
+    except Exception as e:
+        print(f"❌ ERROR: {str(e)}")
+        return False
+
+
+if __name__ == "__main__":
+    success = asyncio.run(main())
+    sys.exit(0 if success else 1)
