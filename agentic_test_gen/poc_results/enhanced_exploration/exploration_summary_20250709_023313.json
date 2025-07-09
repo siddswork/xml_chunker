@@ -1,0 +1,49 @@
+{
+  "timestamp": "20250709_023313",
+  "chunks_explored": [
+    "chunk_003",
+    "chunk_001",
+    "chunk_004_sub_003",
+    "chunk_004_sub_004",
+    "chunk_002",
+    "chunk_004_sub_008",
+    "chunk_004_sub_009",
+    "chunk_004_sub_000",
+    "chunk_004_sub_002",
+    "chunk_004_sub_005",
+    "chunk_004_sub_007",
+    "chunk_004_sub_010",
+    "chunk_000",
+    "chunk_004_sub_011",
+    "chunk_004_sub_006",
+    "chunk_004_sub_001"
+  ],
+  "progress": {
+    "chunks_explored": 16,
+    "target_chunks": 164,
+    "progress_percentage": 9.75609756097561
+  },
+  "statistics": {
+    "mapping_specifications": 0,
+    "template_analyses": 1,
+    "llm_insights": 0,
+    "understanding_evolution_records": 0,
+    "context_resets": 1,
+    "conversation_turns": 9
+  },
+  "cost_tracking": {
+    "total_calls": 24,
+    "total_input_tokens": 88017,
+    "total_output_tokens": 3842,
+    "cumulative_cost_usd": 0.015507749999999999,
+    "cost_per_phase": []
+  },
+  "validation_metrics": {
+    "mappings_per_chunk": [],
+    "understanding_depth_scores": [],
+    "cross_references_found": [],
+    "template_connections_discovered": [],
+    "insights_quality_trend": [],
+    "evolution_milestones": []
+  }
+}

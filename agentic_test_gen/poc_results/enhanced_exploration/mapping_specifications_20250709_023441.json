@@ -1,0 +1,34 @@
+[
+  {
+    "id": "mapping_000",
+    "source_path": "/..",
+    "destination_path": "VPT",
+    "transformation_type": "conditional_mapping",
+    "transformation_logic": {
+      "natural_language": "If input document type is 'P' or 'PT' (passport), convert to standardized code 'VPT'. Otherwise return empty.",
+      "transformation_type": "conditional_lookup",
+      "rules": [
+        {
+          "condition": "input = 'P'",
+          "output": "VPT"
+        },
+        {
+          "condition": "input = 'PT'",
+          "output": "VPT"
+        },
+        {
+          "condition": "default",
+          "output": ""
+        }
+      ],
+      "original_xslt": "<xsl:choose><xsl:when test=\"$input='P'\">..."
+    },
+    "conditions": [
+      "input = 'P'",
+      "input = 'PT'"
+    ],
+    "validation_rules": [],
+    "template_name": "vmf:vmf1_inputtoresult",
+    "chunk_source": "chunk_000"
+  }
+]

@@ -294,7 +294,7 @@ class MappingSpecification:
     source_path: str
     destination_path: str
     transformation_type: str  # direct_mapping, conditional_mapping, function_call, etc.
-    transformation_logic: str
+    transformation_logic: Dict[str, Any]  # Enhanced with natural language description
     conditions: List[str]
     validation_rules: List[str]
     template_name: str
@@ -316,7 +316,7 @@ class TemplateAnalysis:
 class EnhancedXSLTExplorer:
     """Enhanced XSLT explorer with detailed mapping extraction and context management"""
     
-    def __init__(self, openai_api_key: str, xslt_file_path: str, target_coverage: float = 0.2):
+    def __init__(self, openai_api_key: str, xslt_file_path: str, target_coverage: float = 1.0):
         self.openai_client = openai.OpenAI(api_key=openai_api_key)
         self.xslt_file_path = xslt_file_path
         self.target_coverage = target_coverage
@@ -354,6 +354,20 @@ class EnhancedXSLTExplorer:
             "cost_per_phase": []
         }
         
+        # Validation metrics to prove understanding is building
+        self.validation_metrics = {
+            "mappings_per_chunk": [],
+            "understanding_depth_scores": [],
+            "cross_references_found": [],
+            "template_connections_discovered": [],
+            "insights_quality_trend": [],
+            "evolution_milestones": []
+        }
+        
+        # LLM understanding storage
+        self.llm_insights = []
+        self.understanding_evolution = []
+        
         # Available functions
         self.available_functions = {
             "get_current_chunk": self.get_current_chunk,
@@ -361,7 +375,10 @@ class EnhancedXSLTExplorer:
             "analyze_chunk_mappings": self.analyze_chunk_mappings,
             "save_template_analysis": self.save_template_analysis,
             "get_understanding_summary": self.get_understanding_summary,
-            "search_related_chunks": self.search_related_chunks
+            "search_related_chunks": self.search_related_chunks,
+            "save_llm_insights": self.save_llm_insights,
+            "record_understanding_evolution": self.record_understanding_evolution,
+            "get_validation_metrics": self.get_validation_metrics
         }
     
     def get_current_chunk(self) -> Dict[str, Any]:
@@ -401,12 +418,23 @@ class EnhancedXSLTExplorer:
         if "mappings" in mapping_analysis:
             for mapping_data in mapping_analysis["mappings"]:
                 try:
+                    # Handle both old string format and new enhanced format
+                    transformation_logic = mapping_data.get("transformation_logic", "")
+                    if isinstance(transformation_logic, str):
+                        # Convert old string format to enhanced format
+                        transformation_logic = {
+                            "natural_language": transformation_logic,
+                            "original_xslt": transformation_logic,
+                            "rules": [],
+                            "transformation_type": mapping_data.get("transformation_type", "unknown")
+                        }
+                    
                     mapping_spec = MappingSpecification(
                         id=f"mapping_{len(self.mapping_specs):03d}",
                         source_path=mapping_data.get("source_path", ""),
                         destination_path=mapping_data.get("destination_path", ""),
                         transformation_type=mapping_data.get("transformation_type", "unknown"),
-                        transformation_logic=mapping_data.get("transformation_logic", ""),
+                        transformation_logic=transformation_logic,
                         conditions=mapping_data.get("conditions", []),
                         validation_rules=mapping_data.get("validation_rules", []),
                         template_name=mapping_data.get("template_name", ""),
@@ -490,6 +518,128 @@ class EnhancedXSLTExplorer:
             "message": f"Found {len(matches)} chunks matching '{search_pattern}'"
         }
     
+    def save_llm_insights(self, insights: Dict[str, Any]) -> Dict[str, Any]:
+        """Save LLM's understanding insights and observations"""
+        
+        if not insights or not isinstance(insights, dict):
+            return {"success": False, "message": "Invalid insights provided"}
+        
+        # Add metadata
+        insight_record = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "chunk_context": self.chunks[self.current_chunk_index].id if self.current_chunk_index < len(self.chunks) else "",
+            "chunks_explored_so_far": len(self.chunks_explored),
+            "insights": insights
+        }
+        
+        self.llm_insights.append(insight_record)
+        self._save_current_understanding()
+        
+        return {
+            "success": True,
+            "message": f"Saved LLM insights - total insights: {len(self.llm_insights)}",
+            "total_insights": len(self.llm_insights)
+        }
+    
+    def record_understanding_evolution(self, evolution_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Record how LLM's understanding is evolving over time"""
+        
+        if not evolution_data or not isinstance(evolution_data, dict):
+            return {"success": False, "message": "Invalid evolution data provided"}
+        
+        # Add metadata
+        evolution_record = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "chunks_explored": len(self.chunks_explored),
+            "progress_percentage": (len(self.chunks_explored) / self.target_chunks) * 100,
+            "conversation_turn": self.conversation_turns,
+            "evolution_data": evolution_data
+        }
+        
+        self.understanding_evolution.append(evolution_record)
+        self._calculate_validation_metrics()
+        self._save_current_understanding()
+        
+        return {
+            "success": True,
+            "message": f"Recorded understanding evolution - total records: {len(self.understanding_evolution)}",
+            "total_evolution_records": len(self.understanding_evolution)
+        }
+    
+    def _calculate_validation_metrics(self):
+        """Calculate validation metrics to prove understanding is building"""
+        
+        # Track mappings per chunk
+        if len(self.chunks_explored) > 0:
+            mappings_per_chunk = len(self.mapping_specs) / len(self.chunks_explored)
+            self.validation_metrics["mappings_per_chunk"].append(mappings_per_chunk)
+        
+        # Calculate understanding depth score based on recent insights
+        if self.llm_insights:
+            recent_insights = self.llm_insights[-5:]  # Last 5 insights
+            depth_score = sum(len(str(insight.get("insights", {}))) for insight in recent_insights) / len(recent_insights)
+            self.validation_metrics["understanding_depth_scores"].append(depth_score)
+        
+        # Track cross-references found
+        cross_refs = 0
+        for spec in self.mapping_specs:
+            if hasattr(spec, 'dependencies') and spec.dependencies:
+                cross_refs += len(spec.dependencies)
+        self.validation_metrics["cross_references_found"].append(cross_refs)
+        
+        # Track template connections discovered
+        template_connections = len(set(spec.template_name for spec in self.mapping_specs if spec.template_name))
+        self.validation_metrics["template_connections_discovered"].append(template_connections)
+        
+        # Track insights quality trend (based on length and detail)
+        if self.llm_insights:
+            last_insight = self.llm_insights[-1]
+            quality_score = len(str(last_insight.get("insights", {}))) / 100  # Rough quality metric
+            self.validation_metrics["insights_quality_trend"].append(quality_score)
+        
+        # Track evolution milestones
+        if self.understanding_evolution:
+            milestone = {
+                "chunks_explored": len(self.chunks_explored),
+                "mappings_extracted": len(self.mapping_specs),
+                "insights_recorded": len(self.llm_insights),
+                "understanding_breadth": len(set(chunk.chunk_type for chunk in self.chunks if chunk.id in self.chunks_explored))
+            }
+            self.validation_metrics["evolution_milestones"].append(milestone)
+    
+    def get_validation_metrics(self) -> Dict[str, Any]:
+        """Get current validation metrics to prove understanding is building"""
+        
+        # Calculate trends
+        mapping_trend = "increasing" if len(self.validation_metrics["mappings_per_chunk"]) > 1 and \
+                       self.validation_metrics["mappings_per_chunk"][-1] > self.validation_metrics["mappings_per_chunk"][0] else "stable"
+        
+        understanding_trend = "deepening" if len(self.validation_metrics["understanding_depth_scores"]) > 1 and \
+                             self.validation_metrics["understanding_depth_scores"][-1] > self.validation_metrics["understanding_depth_scores"][0] else "stable"
+        
+        return {
+            "success": True,
+            "metrics": {
+                "mappings_per_chunk": self.validation_metrics["mappings_per_chunk"][-5:],  # Last 5 values
+                "understanding_depth_scores": self.validation_metrics["understanding_depth_scores"][-5:],
+                "cross_references_found": self.validation_metrics["cross_references_found"][-5:],
+                "template_connections_discovered": self.validation_metrics["template_connections_discovered"][-5:],
+                "insights_quality_trend": self.validation_metrics["insights_quality_trend"][-5:],
+                "evolution_milestones": self.validation_metrics["evolution_milestones"][-3:]  # Last 3 milestones
+            },
+            "trends": {
+                "mapping_extraction": mapping_trend,
+                "understanding_depth": understanding_trend,
+                "overall_progress": f"{len(self.chunks_explored)}/{self.target_chunks} chunks explored"
+            },
+            "validation_summary": {
+                "total_mappings": len(self.mapping_specs),
+                "total_insights": len(self.llm_insights),
+                "total_evolution_records": len(self.understanding_evolution),
+                "understanding_building": len(self.validation_metrics["evolution_milestones"]) > 0
+            }
+        }
+    
     def _save_current_understanding(self):
         """Save current understanding to files"""
         
@@ -505,6 +655,21 @@ class EnhancedXSLTExplorer:
         with open(templates_file, 'w') as f:
             json.dump([asdict(analysis) for analysis in self.template_analyses], f, indent=2)
         
+        # Save LLM insights
+        insights_file = self.results_dir / f"llm_insights_{timestamp}.json"
+        with open(insights_file, 'w') as f:
+            json.dump(self.llm_insights, f, indent=2)
+        
+        # Save understanding evolution
+        evolution_file = self.results_dir / f"understanding_evolution_{timestamp}.json"
+        with open(evolution_file, 'w') as f:
+            json.dump(self.understanding_evolution, f, indent=2)
+        
+        # Save validation metrics
+        validation_file = self.results_dir / f"validation_metrics_{timestamp}.json"
+        with open(validation_file, 'w') as f:
+            json.dump(self.validation_metrics, f, indent=2)
+        
         # Save exploration summary
         summary_file = self.results_dir / f"exploration_summary_{timestamp}.json"
         summary = {
@@ -518,10 +683,13 @@ class EnhancedXSLTExplorer:
             "statistics": {
                 "mapping_specifications": len(self.mapping_specs),
                 "template_analyses": len(self.template_analyses),
+                "llm_insights": len(self.llm_insights),
+                "understanding_evolution_records": len(self.understanding_evolution),
                 "context_resets": self.context_resets,
                 "conversation_turns": self.conversation_turns
             },
-            "cost_tracking": self.cost_tracker
+            "cost_tracking": self.cost_tracker,
+            "validation_metrics": self.validation_metrics
         }
         
         with open(summary_file, 'w') as f:
@@ -531,6 +699,9 @@ class EnhancedXSLTExplorer:
         print(f"   📁 Directory: {self.results_dir}")
         print(f"   📄 Mappings: {len(self.mapping_specs)} specifications")
         print(f"   📋 Templates: {len(self.template_analyses)} analyses")
+        print(f"   🧠 LLM Insights: {len(self.llm_insights)} records")
+        print(f"   📈 Evolution: {len(self.understanding_evolution)} records")
+        print(f"   📊 Validation Metrics: {len(self.validation_metrics.get('evolution_milestones', []))} milestones")
         print(f"{'~'*60}")
     
     def _should_reset_context(self) -> bool:
@@ -605,6 +776,11 @@ AVAILABLE FUNCTIONS:
 - save_template_analysis(template_analysis): Save template analysis
 - get_understanding_summary(): Check progress
 - search_related_chunks(pattern): Find related chunks
+- save_llm_insights(insights): Save your understanding insights and observations
+- record_understanding_evolution(evolution_data): Record how your understanding evolves
+- get_validation_metrics(): Get metrics proving your understanding is building
+
+IMPORTANT: Use save_llm_insights() to document your understanding and observations as you explore. Use record_understanding_evolution() to track how your understanding of the XSLT transforms over time. Use get_validation_metrics() periodically to verify your understanding is building.
 
 REQUIRED OUTPUT FORMAT for analyze_chunk_mappings():
 {{
@@ -613,7 +789,15 @@ REQUIRED OUTPUT FORMAT for analyze_chunk_mappings():
       "source_path": "xpath/to/source/element",
       "destination_path": "xpath/to/destination/element", 
       "transformation_type": "direct_mapping|conditional_mapping|function_call|text_manipulation",
-      "transformation_logic": "actual XSLT code or description",
+      "transformation_logic": {{
+        "natural_language": "Clear description of what transformation does in plain English",
+        "transformation_type": "conditional_lookup|direct_copy|computed_value|text_manipulation",
+        "rules": [
+          {{"condition": "input condition", "output": "result value"}},
+          {{"condition": "default", "output": "fallback value"}}
+        ],
+        "original_xslt": "actual XSLT code snippet"
+      }},
       "conditions": ["condition1", "condition2"],
       "validation_rules": ["rule1", "rule2"],
       "template_name": "template name"
@@ -621,13 +805,33 @@ REQUIRED OUTPUT FORMAT for analyze_chunk_mappings():
   ]
 }}
 
+EXAMPLE of good transformation_logic:
+{{
+  "natural_language": "If input document type is 'P' or 'PT' (passport), convert to standardized code 'VPT'. Otherwise return empty.",
+  "transformation_type": "conditional_lookup", 
+  "rules": [
+    {{"condition": "input = 'P'", "output": "VPT"}},
+    {{"condition": "input = 'PT'", "output": "VPT"}},
+    {{"condition": "default", "output": ""}}
+  ],
+  "original_xslt": "<xsl:choose><xsl:when test=\"$input='P'\">..."
+}}
+
 EXPLORATION STRATEGY:
 1. get_current_chunk() to see current chunk
 2. Extract ALL source→destination mappings from the chunk
 3. Document transformation logic and conditions
 4. Call analyze_chunk_mappings() with detailed analysis
-5. get_next_chunk() and repeat
-6. Continue until target coverage reached
+5. Call save_llm_insights() with your observations
+6. Call record_understanding_evolution() to track learning
+7. get_next_chunk() and repeat
+8. Continue until target coverage reached
+
+FUNCTION CALL EXAMPLES:
+- get_current_chunk() - No parameters needed
+- analyze_chunk_mappings(mapping_analysis: object with mappings array)
+- save_llm_insights(insights: object with observations and understanding)
+- record_understanding_evolution(evolution_data: object with milestone and understanding_level)
 
 Start by getting the current chunk and analyzing its mappings in detail."""
         
@@ -654,8 +858,8 @@ Start by getting the current chunk and analyzing its mappings in detail."""
         if len(self.chunks_explored) >= self.target_chunks:
             return f"✅ Target coverage reached: {len(self.chunks_explored)}/{self.target_chunks} chunks explored"
         
-        # Safety limit
-        if self.conversation_turns > 50:
+        # Safety limit - increased for complete exploration
+        if self.conversation_turns > 200:
             return f"⚠️ Safety limit reached: {self.conversation_turns} turns"
         
         # Define function schemas
@@ -713,6 +917,39 @@ Start by getting the current chunk and analyzing its mappings in detail."""
                     },
                     "required": ["search_pattern"]
                 }
+            },
+            {
+                "name": "save_llm_insights",
+                "description": "Save LLM's understanding insights and observations",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "insights": {
+                            "type": "object",
+                            "description": "LLM's insights, observations, and understanding"
+                        }
+                    },
+                    "required": ["insights"]
+                }
+            },
+            {
+                "name": "record_understanding_evolution",
+                "description": "Record how LLM's understanding is evolving over time",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "evolution_data": {
+                            "type": "object",
+                            "description": "Data about how understanding has evolved"
+                        }
+                    },
+                    "required": ["evolution_data"]
+                }
+            },
+            {
+                "name": "get_validation_metrics",
+                "description": "Get validation metrics to prove understanding is building over time",
+                "parameters": {"type": "object", "properties": {}}
             }
         ]
         
@@ -763,7 +1000,14 @@ Start by getting the current chunk and analyzing its mappings in detail."""
                     
                     try:
                         if function_name in self.available_functions:
-                            function_result = self.available_functions[function_name](**function_args)
+                            # Handle cases where LLM passes arrays instead of objects
+                            if isinstance(function_args, list):
+                                function_result = {"success": False, "message": f"Function {function_name} expects object parameters, got array"}
+                            elif function_name in ['get_current_chunk', 'get_next_chunk', 'get_understanding_summary', 'get_validation_metrics']:
+                                # Functions that take no parameters
+                                function_result = self.available_functions[function_name]()
+                            else:
+                                function_result = self.available_functions[function_name](**function_args)
                         else:
                             function_result = {"success": False, "message": f"Unknown function: {function_name}"}
                     except Exception as e:
@@ -812,8 +1056,8 @@ async def main():
         return False
     
     try:
-        # Initialize enhanced explorer (20% coverage)
-        explorer = EnhancedXSLTExplorer(api_key, xslt_path, target_coverage=0.2)
+        # Initialize enhanced explorer (100% coverage for complete scanning)
+        explorer = EnhancedXSLTExplorer(api_key, xslt_path, target_coverage=1.0)
         
         # Start exploration
         result = await explorer.start_enhanced_exploration()

@@ -1,0 +1,25 @@
+{
+  "mappings_per_chunk": [
+    0.0
+  ],
+  "understanding_depth_scores": [
+    286.0
+  ],
+  "cross_references_found": [
+    0
+  ],
+  "template_connections_discovered": [
+    0
+  ],
+  "insights_quality_trend": [
+    2.86
+  ],
+  "evolution_milestones": [
+    {
+      "chunks_explored": 1,
+      "mappings_extracted": 0,
+      "insights_recorded": 1,
+      "understanding_breadth": 1
+    }
+  ]
+}
