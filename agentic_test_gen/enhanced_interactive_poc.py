@@ -31,7 +31,260 @@ except ImportError:
     print("⚠️  python-dotenv not found")
 
 import openai
-from create_interactive_poc import SmartXSLTChunker, SimpleChunk
+
+
+@dataclass
+class SimpleChunk:
+    """Simple chunk structure for PoC"""
+    id: str
+    content: str
+    description: str
+    chunk_type: str
+    templates_defined: List[str]
+    template_calls: List[str]
+    variables_defined: List[str]
+    dependencies: List[str]
+    line_start: int
+    line_end: int
+    token_count: int
+
+
+class SmartXSLTChunker:
+    """Smart XSLT chunker that breaks down large templates into logical sections"""
+    
+    def __init__(self):
+        self.max_chunk_size = 100  # lines
+        self.min_chunk_size = 10   # lines
+    
+    def chunk_xslt_file(self, file_path: str) -> List[SimpleChunk]:
+        """Chunk XSLT file with smart splitting of large templates"""
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        lines = content.split('\n')
+        chunks = []
+        
+        # Find template boundaries
+        template_boundaries = self._find_template_boundaries(lines)
+        
+        # Process each template
+        for i, (start, end, template_info) in enumerate(template_boundaries):
+            template_size = end - start
+            
+            if template_size <= self.max_chunk_size:
+                # Small template - keep as single chunk
+                chunk = self._create_chunk(
+                    chunk_id=f"chunk_{i:03d}",
+                    lines=lines[start:end],
+                    line_start=start + 1,
+                    line_end=end,
+                    template_info=template_info
+                )
+                chunks.append(chunk)
+            else:
+                # Large template - split into logical sub-chunks
+                sub_chunks = self._split_large_template(
+                    lines[start:end], 
+                    start, 
+                    template_info,
+                    base_chunk_id=f"chunk_{i:03d}"
+                )
+                chunks.extend(sub_chunks)
+        
+        print(f"✅ Created {len(chunks)} chunks from XSLT file")
+        return chunks
+    
+    def _find_template_boundaries(self, lines: List[str]) -> List[tuple]:
+        """Find template start and end boundaries"""
+        boundaries = []
+        current_template = None
+        
+        for i, line in enumerate(lines):
+            if '<xsl:template' in line:
+                if current_template:
+                    # End previous template
+                    boundaries.append(current_template)
+                
+                # Start new template
+                template_info = self._extract_template_info(line)
+                current_template = [i, None, template_info]
+            
+            elif '</xsl:template>' in line and current_template:
+                # End current template
+                current_template[1] = i + 1
+                boundaries.append(tuple(current_template))
+                current_template = None
+        
+        # Handle last template
+        if current_template:
+            current_template[1] = len(lines)
+            boundaries.append(tuple(current_template))
+        
+        return boundaries
+    
+    def _extract_template_info(self, line: str) -> Dict[str, Any]:
+        """Extract template information from template declaration"""
+        info = {"type": "template", "name": None, "match": None}
+        
+        # Extract name
+        name_match = re.search(r'name="([^"]+)"', line)
+        if name_match:
+            info["name"] = name_match.group(1)
+        
+        # Extract match
+        match_match = re.search(r'match="([^"]+)"', line)
+        if match_match:
+            info["match"] = match_match.group(1)
+        
+        # Determine type
+        if info["name"] and "vmf:" in info["name"]:
+            info["type"] = "helper"
+        elif info["match"]:
+            info["type"] = "main"
+        
+        return info
+    
+    def _split_large_template(self, template_lines: List[str], start_line: int, 
+                            template_info: Dict[str, Any], base_chunk_id: str) -> List[SimpleChunk]:
+        """Split large template into logical sub-chunks"""
+        
+        sub_chunks = []
+        current_chunk_lines = []
+        current_chunk_start = start_line
+        chunk_counter = 0
+        
+        # Look for logical boundaries in the template
+        for i, line in enumerate(template_lines):
+            current_chunk_lines.append(line)
+            
+            # Check for logical boundaries
+            if self._is_logical_boundary(line) and len(current_chunk_lines) >= self.min_chunk_size:
+                # Create sub-chunk
+                sub_chunk = self._create_chunk(
+                    chunk_id=f"{base_chunk_id}_sub_{chunk_counter:03d}",
+                    lines=current_chunk_lines,
+                    line_start=current_chunk_start + 1,
+                    line_end=current_chunk_start + len(current_chunk_lines),
+                    template_info=template_info,
+                    is_sub_chunk=True
+                )
+                sub_chunks.append(sub_chunk)
+                
+                # Reset for next chunk
+                current_chunk_lines = []
+                current_chunk_start = start_line + i + 1
+                chunk_counter += 1
+            
+            # Force split if chunk gets too large
+            elif len(current_chunk_lines) >= self.max_chunk_size:
+                sub_chunk = self._create_chunk(
+                    chunk_id=f"{base_chunk_id}_sub_{chunk_counter:03d}",
+                    lines=current_chunk_lines,
+                    line_start=current_chunk_start + 1,
+                    line_end=current_chunk_start + len(current_chunk_lines),
+                    template_info=template_info,
+                    is_sub_chunk=True
+                )
+                sub_chunks.append(sub_chunk)
+                
+                current_chunk_lines = []
+                current_chunk_start = start_line + i + 1
+                chunk_counter += 1
+        
+        # Handle remaining lines
+        if current_chunk_lines:
+            sub_chunk = self._create_chunk(
+                chunk_id=f"{base_chunk_id}_sub_{chunk_counter:03d}",
+                lines=current_chunk_lines,
+                line_start=current_chunk_start + 1,
+                line_end=current_chunk_start + len(current_chunk_lines),
+                template_info=template_info,
+                is_sub_chunk=True
+            )
+            sub_chunks.append(sub_chunk)
+        
+        return sub_chunks
+    
+    def _is_logical_boundary(self, line: str) -> bool:
+        """Check if line represents a logical boundary for splitting"""
+        line_stripped = line.strip()
+        
+        # Major structural elements
+        if any(tag in line_stripped for tag in [
+            '</xsl:for-each>',
+            '</xsl:choose>',
+            '</xsl:if>',
+            '</xsl:variable>',
+            '</xsl:when>',
+            '</xsl:otherwise>'
+        ]):
+            return True
+        
+        # Variable declarations
+        if '<xsl:variable' in line_stripped:
+            return True
+        
+        # Comments
+        if line_stripped.startswith('<!--'):
+            return True
+        
+        return False
+    
+    def _create_chunk(self, chunk_id: str, lines: List[str], line_start: int, 
+                     line_end: int, template_info: Dict[str, Any], is_sub_chunk: bool = False) -> SimpleChunk:
+        """Create a chunk from lines"""
+        
+        content = '\n'.join(lines)
+        
+        # Extract metadata
+        templates_defined = []
+        template_calls = []
+        variables_defined = []
+        
+        if not is_sub_chunk:
+            if template_info.get("name"):
+                templates_defined.append(template_info["name"])
+            if template_info.get("match"):
+                templates_defined.append(f"match:{template_info['match']}")
+        
+        # Find template calls
+        for line in lines:
+            calls = re.findall(r'<xsl:call-template\s+name="([^"]+)"', line)
+            template_calls.extend(calls)
+        
+        # Find variables
+        for line in lines:
+            vars_def = re.findall(r'<xsl:variable\s+name="([^"]+)"', line)
+            variables_defined.extend(vars_def)
+        
+        # Generate description
+        if is_sub_chunk:
+            description = f"Sub-section of {template_info.get('name', 'template')} - {template_info.get('type', 'processing')} logic"
+        else:
+            if template_info.get("name"):
+                description = f"Template: {template_info['name']} ({template_info.get('type', 'unknown')})"
+            elif template_info.get("match"):
+                description = f"Main template matching: {template_info['match']}"
+            else:
+                description = "XSLT template"
+        
+        # Estimate token count (rough approximation)
+        token_count = len(content.split())
+        
+        return SimpleChunk(
+            id=chunk_id,
+            content=content,
+            description=description,
+            chunk_type=template_info.get("type", "unknown"),
+            templates_defined=templates_defined,
+            template_calls=template_calls,
+            variables_defined=variables_defined,
+            dependencies=template_calls,
+            line_start=line_start,
+            line_end=line_end,
+            token_count=token_count
+        )
 
 
 @dataclass
